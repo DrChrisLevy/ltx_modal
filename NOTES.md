@@ -460,7 +460,19 @@ Keep both transformers + Gemma + upscaler resident on GPU in `@modal.enter()`. W
 
 ### Implementation Approach
 
-The pipeline source code in `ltx-core` and `ltx-pipelines` shows exactly what each pipeline does internally. The core loop is:
+**Step 1 — Quick win: StateDictRegistry**
+
+Pass a shared `StateDictRegistry` to all `ModelLedger` instances. First call reads from disk (~55s), subsequent calls copy from CPU RAM → GPU (~10-15s). Minimal code change in `_create_pipelines()`.
+
+```python
+from ltx_core.loader.registry import StateDictRegistry
+registry = StateDictRegistry()
+# Pass registry=registry to all ModelLedger constructors
+```
+
+**Step 2 — Full optimization: persistent models on GPU**
+
+Don't use the pipeline classes. Replicate their inference logic with persistent model references. The core loop (visible in every pipeline's `__call__`):
 
 1. Encode text with Gemma → get video/audio context embeddings
 2. Create initial noise + conditioning
@@ -469,7 +481,31 @@ The pipeline source code in `ltx-core` and `ltx-pipelines` shows exactly what ea
 5. Run stage 2 denoising loop (same transformer, different LoRA/sigmas)
 6. Decode with video VAE + audio VAE + vocoder
 
-We replicate this logic but with persistent model references instead of load-use-delete cycles. The building blocks are all in `ltx-core`: schedulers, guiders, noisers, patchifiers, denoising loops.
+**Key source files to study:**
+
+| File | What to look at |
+|------|----------------|
+| `LTX-2/packages/ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages.py` | Standard pipeline `__call__` — the full inference flow to replicate |
+| `LTX-2/packages/ltx-pipelines/src/ltx_pipelines/distilled.py` | Distilled pipeline `__call__` — simpler, no guidance |
+| `LTX-2/packages/ltx-pipelines/src/ltx_pipelines/utils/helpers.py` | `encode_prompts()`, `denoise_audio_video()`, `combined_image_conditionings()`, `cleanup_memory()` |
+| `LTX-2/packages/ltx-pipelines/src/ltx_pipelines/utils/samplers.py` | `euler_denoising_loop()` — the actual step loop |
+| `LTX-2/packages/ltx-pipelines/src/ltx_pipelines/utils/model_ledger.py` | `ModelLedger` — understand what it does so we can bypass it |
+| `LTX-2/packages/ltx-core/src/ltx_core/loader/single_gpu_model_builder.py` | `build()` method — how models are constructed. We call this ONCE in setup. |
+| `LTX-2/packages/ltx-core/src/ltx_core/loader/registry.py` | `StateDictRegistry` for step 1 quick win |
+| `LTX-2/packages/ltx-core/src/ltx_core/model/video_vae/video_vae.py` | `decode_video()` — returns lazy iterator, must consume in no_grad |
+| `LTX-2/packages/ltx-core/src/ltx_core/model/audio_vae/audio_vae.py` | `decode_audio()` — returns Audio object |
+| `LTX-2/packages/ltx-core/src/ltx_core/model/upsampler/` | `upsample_video()` — spatial 2x upscaling |
+| `LTX-2/packages/ltx-core/src/ltx_core/components/schedulers.py` | `LTX2Scheduler` — sigma schedule generation |
+| `LTX-2/packages/ltx-core/src/ltx_core/components/guiders.py` | `MultiModalGuiderParams`, `create_multimodal_guider_factory` |
+| `LTX-2/packages/ltx-pipelines/src/ltx_pipelines/utils/constants.py` | Default params, distilled sigma values |
+
+**Two transformer strategy:** Keep both dev and distilled transformers on GPU (~44GB total in FP8). For standard mode stage 2, either apply/remove the distilled LoRA dynamically, or keep a third transformer copy with LoRA pre-fused.
+
+**Critical: torch.no_grad()** — ALL operations including lazy VAE decode must run inside no_grad. Without it, autograd stores all conv3d intermediates → OOM.
+
+**Step 3 — Memory snapshots**
+
+After step 2, use Modal's `enable_memory_snapshot=True` to snapshot the warm state. Cuts cold start from ~90s to ~10-30s.
 
 ### Other Future Work
 
