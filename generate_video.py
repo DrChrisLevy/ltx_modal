@@ -49,7 +49,6 @@ image = (
         "numpy",
         "transformers>=4.52,<5",
         "safetensors",
-        "accelerate",
         "scipy>=1.14",
         "av",
         "tqdm",
