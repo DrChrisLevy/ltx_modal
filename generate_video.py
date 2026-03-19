@@ -1,10 +1,10 @@
 """
-LTX-2.3 on Modal — all generation modes on one H200 endpoint.
+LTX-2.3 Video Generation on Modal (H200, FP8).
 
 Modes:
-  standard — two-stage 30-step diffusion + 2x upscale (1024x1536)
-  fast     — distilled 8+4 steps, ~4x faster (1024x1536)
-  hq       — res_2s sampler, 15 steps, higher res (1088x1920)
+  standard — 30-step diffusion + 2x upscale, best quality (1024x1536)
+  fast     — distilled 8+4 steps, ~2x faster (1024x1536)
+  hq       — res_2s sampler, 15 steps, 1080p (1088x1920)
 
 Features:
   text-to-video | image-to-video | audio-to-video
@@ -14,7 +14,12 @@ Usage:
     uv run modal run generate_video.py --prompt "A cat sitting on a windowsill"
     uv run modal run generate_video.py --prompt "..." --mode fast
     uv run modal run generate_video.py --prompt "..." --mode hq
-    uv run modal deploy generate_video.py
+    uv run modal run generate_video.py --prompt "..." --num-frames 241      # 10s
+    uv run modal run generate_video.py --prompt "..." --image photo.jpg     # image-to-video
+    uv run modal run generate_video.py --prompt "..." --enhance-prompt      # auto-enhance
+    uv run modal deploy generate_video.py                                   # web API
+
+See docs.md for full parameter reference, prompting guide, and Python API examples.
 """
 
 import modal
