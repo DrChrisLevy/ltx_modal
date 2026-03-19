@@ -110,28 +110,67 @@ Height and width must be divisible by **64** (two-stage pipeline requires this s
 
 Higher resolution = more VRAM for VAE decode. All tested resolutions work up to 20s (481 frames) on H200.
 
-## Writing Good Prompts
+## Prompting Guide
 
-LTX-2.3 works best with detailed, **chronological** descriptions written like a shot list. Think like a cinematographer.
+Write prompts as a **single flowing paragraph** in **present tense**, 4–8 sentences. Think like a cinematographer describing a shot list. Keep within 200 words.
 
-**Structure your prompt:**
-1. Start with the main action in one sentence
-2. Add specific movements and gestures
-3. Describe character/object appearances precisely
-4. Include background and environment details
-5. Specify camera angles and movements
-6. Describe lighting and colors
-7. Note any changes or events
+### Six Elements of a Good Prompt
 
-**Keep within 200 words.** Start directly with the action, keep descriptions literal and precise.
+1. **Shot establishment** — Set the shot scale and visual style using cinematography terms. ("Close-up", "wide establishing shot", "over-the-shoulder")
 
-**Good prompt:**
-> A woman in a red dress walks along a rain-soaked city street at night. Neon signs in blues and pinks reflect off the wet pavement. She pauses to look up at a flickering sign, her face illuminated by its glow. The camera tracks alongside her at eye level, slowly pushing in as she turns toward the lens. Shallow depth of field blurs the background traffic into soft bokeh.
+2. **Scene setting** — Describe lighting, color palette, textures, and atmosphere. ("Golden hour light filters through dusty warehouse windows, warm amber tones on weathered concrete")
 
-**Bad prompt:**
+3. **Action** — Present the core action as a natural sequence from start to finish. Use present tense verbs. ("She reaches for the door handle, pauses, then pushes it open")
+
+4. **Character definition** — Specify age, hairstyle, clothing, features. Convey emotion through **physical cues, not abstract labels** — "her jaw tightens and she narrows her eyes" instead of "she looks angry".
+
+5. **Camera movement** — Specify how and when the camera moves. Describe what the subject looks like after the movement. ("The camera slowly dollies in as she turns toward the lens, her expression shifting from concern to relief")
+
+6. **Audio** — Describe ambient sound, music, dialogue (in quotation marks). Specify language/accent if relevant. ("Distant thunder rumbles, rain patters on metal rooftops")
+
+### What Works Well
+
+- Cinematic compositions with thoughtful lighting and shallow depth of field
+- Strong emotional expressions with subtle gestures and facial nuance
+- Atmospheric elements: fog, mist, golden-hour light, rain, reflections
+- Explicit camera instructions: "slow dolly in", "handheld tracking", "static wide shot"
+- Stylized aesthetics: painterly, noir, analog film, fashion editorial
+- Characters can talk and sing (multiple languages supported)
+- Pacing cues: slow motion, time-lapse, lingering shot, continuous shot
+
+### What to Avoid
+
+- **Abstract emotions** — don't say "sad" or "happy", show it physically
+- **Text and logos** — readable text is unreliable
+- **Complex physics** — chaotic motion creates artifacts (dancing is fine)
+- **Overloaded scenes** — too many characters or simultaneous actions
+- **Conflicting lighting** — e.g. "bright sunlight" and "dark moody shadows"
+- **Overcomplicated prompts** — start simple, layer complexity gradually
+
+### Useful Vocabulary
+
+**Camera:** follows, tracks, pans across, circles around, tilts upward, pushes in, pulls back, overhead view, handheld, static frame
+
+**Lighting:** flickering candles, neon glow, natural sunlight, dramatic shadows, backlighting, rim light
+
+**Atmosphere:** fog, rain, dust, smoke, particles, mist
+
+**Pacing:** slow motion, time-lapse, rapid cuts, lingering shot, freeze-frame, seamless transition
+
+**Style:** stop-motion, 2D/3D animation, claymation, comic book, cyberpunk, film noir, documentary, surreal, minimalist, painterly
+
+### Examples
+
+**Good — detailed, chronological, visual:**
+> A woman in a red dress walks along a rain-soaked city street at night. Neon signs in blues and pinks reflect off the wet pavement. She pauses to look up at a flickering sign, her face illuminated by its glow. The camera tracks alongside her at eye level, slowly pushing in as she turns toward the lens. Shallow depth of field blurs the background traffic into soft bokeh. Distant car horns and the hum of a bass-heavy song drift from a nearby bar.
+
+**Bad — vague, tag-based:**
 > Beautiful woman walking in city, cinematic, 4K, highly detailed
 
-**Enhance prompt**: Pass `--enhance-prompt` to let Gemma 3 automatically expand a short prompt into a detailed cinematic description. Useful when you have a rough idea but don't want to write the full description.
+**Short but effective (with `--enhance-prompt`):**
+> a dog playing in snow
+
+The `--enhance-prompt` flag lets Gemma 3 automatically expand a short prompt into a detailed cinematic description. Good for quick iteration when you have a rough idea.
 
 ## Image-to-Video
 
