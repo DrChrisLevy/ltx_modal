@@ -643,15 +643,14 @@ class LTXVideo:
                 tiling_config=TilingConfig.default(),
             )
 
-        # Retake uses source video's frame count/rate — estimate from time range
+        # Retake uses source video's frame count/rate
         from ltx_pipelines.utils.media_io import get_videostream_metadata
 
-        meta = get_videostream_metadata(video_path)
-        num_frames = meta.num_frames
-        frame_rate = meta.fps
+        fps, num_frames, _w, _h = get_videostream_metadata(video_path)
+        frame_rate = fps
 
         gen_time = time.time() - t0
-        result = self._encode_result_raw_audio(
+        result = self._encode_result(
             video, audio_tensor, num_frames, frame_rate, prompt, seed
         )
         result["mode"] = "retake"
