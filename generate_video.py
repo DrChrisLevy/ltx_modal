@@ -273,20 +273,6 @@ class LTXVideo:
             "size_mb": round(len(video_bytes) / 1024 / 1024, 2),
         }
 
-    def _encode_result_raw_audio(
-        self, video, audio_tensor, num_frames, frame_rate, prompt, seed, save_name=None
-    ):
-        """Like _encode_result but for retake pipeline which returns raw audio tensor."""
-        import torchaudio
-
-        from ltx_core.types import Audio
-
-        # Retake returns a waveform tensor — wrap it as Audio for encode_video
-        audio = Audio(waveform=audio_tensor, sampling_rate=24000)
-        return self._encode_result(
-            video, audio, num_frames, frame_rate, prompt, seed, save_name
-        )
-
     def _save(self, video_bytes, prompt, seed, duration, name=None):
         import json
         import os

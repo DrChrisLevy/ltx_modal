@@ -11,3 +11,14 @@ wheels/
 
 # Generated videos
 *.mp4
+
+# Test assets (downloaded for battle testing)
+test_*.jpeg
+test_*.wav
+electric_snippet.wav
+
+# Log files
+*.log
+
+# Cloned LTX-2 repo (reference only)
+LTX-2/
