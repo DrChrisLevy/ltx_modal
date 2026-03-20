@@ -116,7 +116,8 @@ class LTXVideo:
 
         self._ensure_models()
         self._create_pipelines()
-        print("All pipelines ready.")
+        self._load_persistent_models()
+        print("All models loaded and ready.")
 
     def _ensure_models(self):
         import os
@@ -200,6 +201,100 @@ class LTXVideo:
                 checkpoint_path=dev_ckpt, loras=[], **shared
             ),
         }
+
+    def _load_persistent_models(self):
+        """Build all models once, then patch each pipeline's ModelLedger
+        to return the pre-built models instead of rebuilding from disk.
+
+        Pipeline code runs completely unchanged — it calls ledger.transformer(),
+        ledger.video_decoder(), etc. as before. The only difference is that
+        these now return persistent GPU-resident models instead of fresh builds.
+
+        VRAM: ~102GB (3 transformers + Gemma + VAEs). HQ mode's transformers
+        (LoRA at 0.25/0.5) are NOT pre-built — they'd push past 141GB.
+        HQ builds its transformers fresh (~15s each) but shares everything else.
+        """
+        import torch
+        from ltx_pipelines.utils.model_ledger import ModelLedger
+
+        # --- Build shared components from dev checkpoint ---
+        dev_ledger = self._pipelines["standard"].stage_1_model_ledger
+
+        print("Loading text encoder (Gemma 3 12B)...")
+        text_encoder = dev_ledger.text_encoder()
+        print("Loading spatial upsampler...")
+        upsampler = dev_ledger.spatial_upsampler()
+
+        print("Loading dev checkpoint components...")
+        dev_emb = dev_ledger.gemma_embeddings_processor()
+        dev_venc = dev_ledger.video_encoder()
+        dev_vdec = dev_ledger.video_decoder()
+        dev_aenc = dev_ledger.audio_encoder()
+        dev_adec = dev_ledger.audio_decoder()
+        dev_voc = dev_ledger.vocoder()
+
+        # --- Build distilled checkpoint components ---
+        dist_ledger = self._pipelines["fast"].model_ledger
+
+        print("Loading distilled checkpoint components...")
+        dist_emb = dist_ledger.gemma_embeddings_processor()
+        dist_venc = dist_ledger.video_encoder()
+        dist_vdec = dist_ledger.video_decoder()
+        dist_aenc = dist_ledger.audio_encoder()
+        dist_adec = dist_ledger.audio_decoder()
+        dist_voc = dist_ledger.vocoder()
+
+        # --- Build transformers (3 variants, 22GB each) ---
+        print("Loading dev transformer...")
+        dev_xfmr = dev_ledger.transformer()
+        print("Loading dev+lora transformer...")
+        dev_lora_xfmr = self._pipelines["standard"].stage_2_model_ledger.transformer()
+        print("Loading distilled transformer...")
+        dist_xfmr = dist_ledger.transformer()
+
+        # --- Patch all ledgers to return pre-built models ---
+
+        def patch(ledger, *, text_enc, emb, venc, vdec, aenc, adec, voc, ups, xfmr=None):
+            """Replace a ModelLedger's factory methods with cached returns."""
+            ledger.text_encoder = lambda te=text_enc: te
+            ledger.gemma_embeddings_processor = lambda e=emb: e
+            ledger.video_encoder = lambda v=venc: v
+            ledger.video_decoder = lambda v=vdec: v
+            ledger.audio_encoder = lambda a=aenc: a
+            ledger.audio_decoder = lambda a=adec: a
+            ledger.vocoder = lambda v=voc: v
+            ledger.spatial_upsampler = lambda u=ups: u
+            if xfmr is not None:
+                ledger.transformer = lambda x=xfmr: x
+
+        dev_kw = dict(text_enc=text_encoder, emb=dev_emb, venc=dev_venc,
+                      vdec=dev_vdec, aenc=dev_aenc, adec=dev_adec,
+                      voc=dev_voc, ups=upsampler)
+
+        # Standard: stage 1 = dev, stage 2 = dev+lora
+        patch(self._pipelines["standard"].stage_1_model_ledger, **dev_kw, xfmr=dev_xfmr)
+        patch(self._pipelines["standard"].stage_2_model_ledger, **dev_kw, xfmr=dev_lora_xfmr)
+
+        # A2vid, keyframe: same transformers as standard
+        patch(self._pipelines["a2vid"].stage_1_model_ledger, **dev_kw, xfmr=dev_xfmr)
+        patch(self._pipelines["a2vid"].stage_2_model_ledger, **dev_kw, xfmr=dev_lora_xfmr)
+        patch(self._pipelines["keyframe"].stage_1_model_ledger, **dev_kw, xfmr=dev_xfmr)
+        patch(self._pipelines["keyframe"].stage_2_model_ledger, **dev_kw, xfmr=dev_lora_xfmr)
+
+        # Retake: dev transformer, no LoRA
+        patch(self._pipelines["retake"].model_ledger, **dev_kw, xfmr=dev_xfmr)
+
+        # HQ: shared components but NOT transformers (different LoRA strengths, won't fit in VRAM)
+        patch(self._pipelines["hq"].stage_1_model_ledger, **dev_kw)
+        patch(self._pipelines["hq"].stage_2_model_ledger, **dev_kw)
+
+        # Fast: distilled checkpoint
+        patch(dist_ledger, text_enc=text_encoder, emb=dist_emb, venc=dist_venc,
+              vdec=dist_vdec, aenc=dist_aenc, adec=dist_adec,
+              voc=dist_voc, ups=upsampler, xfmr=dist_xfmr)
+
+        vram = torch.cuda.memory_allocated() / 1024**3
+        print(f"VRAM used by persistent models: {vram:.1f} GB")
 
     # -------------------------------------------------------------------
     # Helpers

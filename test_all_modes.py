@@ -22,7 +22,7 @@ from generate_video import app, LTXVideo
 
 
 def _save(result, name):
-    fname = f"test_{name}.mp4"
+    fname = f"patched_{name}.mp4"
     with open(fname, "wb") as f:
         f.write(result["video_bytes"])
     print(
