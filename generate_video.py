@@ -46,27 +46,20 @@ hf_secret = modal.Secret.from_name("huggingface-secret")
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git", "ffmpeg")
-    .pip_install(
-        "torch~=2.7",
-        "torchaudio",
+    .run_commands(
+        "git clone https://github.com/Lightricks/LTX-2.git /ltx2",
+        "pip install uv-build",
+        "pip install -e /ltx2/packages/ltx-core -e /ltx2/packages/ltx-pipelines 'transformers>=4.52,<5'",
+    )
+    .uv_pip_install(
         "xformers>=0.0.30",
-        "einops",
-        "numpy",
-        "transformers>=4.52,<5",
-        "safetensors",
-        "scipy>=1.14",
-        "av",
-        "tqdm",
-        "pillow",
         "huggingface_hub",
         "sentencepiece",
         "protobuf",
         "fastapi[standard]",
     )
-    .run_commands("git clone https://github.com/Lightricks/LTX-2.git /ltx2")
     .env(
         {
-            "PYTHONPATH": "/ltx2/packages/ltx-core/src:/ltx2/packages/ltx-pipelines/src",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
             "CUDA_MODULE_LOADING": "LAZY",
         }
