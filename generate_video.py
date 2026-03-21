@@ -13,19 +13,9 @@ Modes:
   retake   — regenerate a time region of existing video
 
 Usage:
-    # CLI
     uv run modal run generate_video.py --mode standard --prompt "A cat on a windowsill"
     uv run modal run generate_video.py --mode fast --prompt "..." --precision fp8
     uv run modal run generate_video.py --mode a2vid --prompt "..." --audio audio.wav
-
-    # Deploy API
-    uv run modal deploy generate_video.py
-
-    # API (mode & precision are query params, routed to separate container pools)
-    POST /generate?mode=standard  {"prompt": "..."}
-    POST /generate?mode=a2vid                   {"prompt": "...", "audio_base64": "..."}
-    POST /generate?mode=keyframe                {"prompt": "...", "keyframes": [...]}
-    POST /generate?mode=retake                  {"prompt": "...", "video_base64": "...", ...}
 """
 
 import modal
@@ -750,142 +740,6 @@ class LTXVideo:
             videos.append(entry)
         return videos
 
-    # -------------------------------------------------------------------
-    # Web API
-    # -------------------------------------------------------------------
-
-    @modal.fastapi_endpoint(method="POST", docs=True)
-    def api_generate(self, body: dict):
-        """POST endpoint — generates video based on the container's mode.
-
-        Body fields depend on mode:
-          standard/fast/hq: prompt, seed, height, width, num_frames, ...
-          a2vid: prompt, audio_base64, seed, ...
-          keyframe: prompt, keyframes [{image_base64, frame_idx, strength}], ...
-          retake: prompt, video_base64, start_time, end_time, ...
-
-        Returns MP4 video bytes.
-        """
-        import base64
-
-        from fastapi.responses import Response
-
-        prompt = body.get("prompt", "")
-        seed = body.get("seed", 42)
-        num_frames = body.get("num_frames", 121)
-        frame_rate = body.get("frame_rate", 24.0)
-        enhance_prompt = body.get("enhance_prompt", False)
-        negative_prompt = body.get("negative_prompt", "")
-
-        image_bytes = None
-        if body.get("image_base64"):
-            image_bytes = base64.b64decode(body["image_base64"])
-
-        if self.mode in ("standard", "fast", "hq"):
-            result = self.generate.local(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                seed=seed,
-                height=body.get("height"),
-                width=body.get("width"),
-                num_frames=num_frames,
-                frame_rate=frame_rate,
-                num_inference_steps=body.get("num_inference_steps"),
-                cfg_scale=body.get("cfg_scale", 3.0),
-                stg_scale=body.get("stg_scale"),
-                rescale_scale=body.get("rescale_scale"),
-                image_bytes=image_bytes,
-                image_strength=body.get("image_strength", 1.0),
-                enhance_prompt=enhance_prompt,
-            )
-
-        elif self.mode == "a2vid":
-            audio_b64 = body.get("audio_base64")
-            if not audio_b64:
-                return {"error": "audio_base64 is required for a2vid mode"}
-            result = self.generate_from_audio.local(
-                prompt=prompt,
-                audio_bytes=base64.b64decode(audio_b64),
-                negative_prompt=negative_prompt,
-                seed=seed,
-                height=body.get("height", 1024),
-                width=body.get("width", 1536),
-                num_frames=num_frames,
-                frame_rate=frame_rate,
-                num_inference_steps=body.get("num_inference_steps", 30),
-                cfg_scale=body.get("cfg_scale", 3.0),
-                stg_scale=body.get("stg_scale", 1.0),
-                rescale_scale=body.get("rescale_scale", 0.7),
-                image_bytes=image_bytes,
-                image_strength=body.get("image_strength", 1.0),
-                audio_start_time=body.get("audio_start_time", 0.0),
-                audio_max_duration=body.get("audio_max_duration"),
-                enhance_prompt=enhance_prompt,
-            )
-
-        elif self.mode == "keyframe":
-            keyframes_raw = body.get("keyframes", [])
-            if not keyframes_raw:
-                return {"error": "keyframes list is required for keyframe mode"}
-            keyframe_images = [
-                (base64.b64decode(kf["image_base64"]), kf["frame_idx"], kf.get("strength", 1.0))
-                for kf in keyframes_raw
-            ]
-            result = self.interpolate.local(
-                prompt=prompt,
-                keyframe_images=keyframe_images,
-                negative_prompt=negative_prompt,
-                seed=seed,
-                height=body.get("height", 1024),
-                width=body.get("width", 1536),
-                num_frames=num_frames,
-                frame_rate=frame_rate,
-                num_inference_steps=body.get("num_inference_steps", 30),
-                cfg_scale=body.get("cfg_scale", 3.0),
-                stg_scale=body.get("stg_scale", 1.0),
-                rescale_scale=body.get("rescale_scale", 0.7),
-                enhance_prompt=enhance_prompt,
-            )
-
-        elif self.mode == "retake":
-            video_b64 = body.get("video_base64")
-            if not video_b64:
-                return {"error": "video_base64 is required for retake mode"}
-            if body.get("start_time") is None or body.get("end_time") is None:
-                return {"error": "start_time and end_time are required for retake mode"}
-            result = self.retake.local(
-                video_bytes=base64.b64decode(video_b64),
-                prompt=prompt,
-                start_time=body["start_time"],
-                end_time=body["end_time"],
-                seed=seed,
-                negative_prompt=negative_prompt,
-                num_inference_steps=body.get("num_inference_steps", 40),
-                cfg_scale=body.get("cfg_scale", 3.0),
-                stg_scale=body.get("stg_scale", 1.0),
-                rescale_scale=body.get("rescale_scale", 0.7),
-                regenerate_video=body.get("regenerate_video", True),
-                regenerate_audio=body.get("regenerate_audio", True),
-                enhance_prompt=enhance_prompt,
-            )
-        else:
-            return {"error": f"Unknown mode: {self.mode}"}
-
-        return Response(
-            content=result["video_bytes"],
-            media_type="video/mp4",
-            headers={
-                "Content-Disposition": f'attachment; filename="{result["filename"]}"',
-                "X-Duration": str(result["duration"]),
-                "X-Size-MB": str(result["size_mb"]),
-                "X-Gen-Time": str(result.get("gen_time_s", "")),
-            },
-        )
-
-    @modal.fastapi_endpoint(docs=True)
-    def api_list(self):
-        """GET endpoint — list generated videos."""
-        return self.list_outputs.local()
 
 
 # ---------------------------------------------------------------------------

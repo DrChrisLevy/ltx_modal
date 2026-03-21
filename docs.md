@@ -1,388 +1,326 @@
 # LTX-2.3 Video Generation — User Guide
 
-Generate videos from text, images, and audio using the Lightricks LTX-2.3 model (22B parameters) running on Modal H200 GPUs with FP8 quantization.
+Generate videos from text, images, and audio using the Lightricks LTX-2.3 model (22B parameters) running on Modal H200 GPUs.
 
 ## Quick Start
 
 ```bash
-# Text-to-video (5 seconds, default settings)
-uv run modal run generate_video.py --prompt "A cat sitting on a windowsill watching rain"
+# Text-to-video (5 seconds, standard mode, BF16)
+uv run modal run generate_video.py --mode standard --prompt "A cat sitting on a windowsill watching rain"
 
-# Fast mode (~2x faster, slightly lower quality)
-uv run modal run generate_video.py --prompt "..." --mode fast
+# Fast mode (~4x faster)
+uv run modal run generate_video.py --mode fast --prompt "..."
 
 # HQ mode (1080p, res_2s sampler)
-uv run modal run generate_video.py --prompt "..." --mode hq
+uv run modal run generate_video.py --mode hq --prompt "..."
 
 # Longer video (10 seconds)
-uv run modal run generate_video.py --prompt "..." --num-frames 241
+uv run modal run generate_video.py --mode fast --prompt "..." --num-frames 241
 
 # Image-to-video (animate a photo)
-uv run modal run generate_video.py --prompt "She turns and smiles" --image photo.jpg
+uv run modal run generate_video.py --mode standard --prompt "She turns and smiles" --image photo.jpg
 
-# Multiple videos with different seeds
-uv run modal run generate_video.py --prompt "..." --num-videos 3
-
-# Deploy as web API
-uv run modal deploy generate_video.py
+# FP8 precision (lower quality, uses less VRAM)
+uv run modal run generate_video.py --mode standard --prompt "..." --precision fp8
 ```
+
+## Architecture
+
+Each `(mode, precision)` combination runs in its **own container pool** via Modal's parametrized functions. Containers load only the models their mode requires — no wasted VRAM.
+
+```
+LTXVideo(mode="standard")  →  Container pool A (dev transformer + dev+LoRA transformer)
+LTXVideo(mode="fast")      →  Container pool B (distilled transformer only)
+LTXVideo(mode="hq")        →  Container pool C (two HQ LoRA transformers)
+LTXVideo(mode="a2vid")     →  Container pool D (same models as standard)
+LTXVideo(mode="keyframe")  →  Container pool E (same models as standard)
+LTXVideo(mode="retake")    →  Container pool F (dev transformer only, no upscaler)
+```
+
+All models are pre-loaded into GPU VRAM at container startup. No per-request model loading — diffusion starts immediately.
 
 ## Generation Modes
 
 ### standard (default)
 
-Best quality. Uses the full dev model with classifier-free guidance and spatio-temporal guidance for high-fidelity output.
+Best quality. Uses the full dev model with classifier-free guidance.
 
 - **Steps**: 30 (stage 1) + 4 (stage 2 refinement)
-- **Resolution**: 1024x1536 (stage 1 at 512x768, then 2x upscaled)
-- **Best for**: Final output, production quality
+- **Resolution**: 1024x1536
+- **Gen time**: ~71s for 5s video (BF16)
 
 ### fast
 
-Fastest generation. Uses a distilled model with a fixed 8-step sigma schedule — no guidance needed.
+Fastest generation. Uses a distilled model with fixed sigma schedule.
 
 - **Steps**: 8 (stage 1) + 4 (stage 2 refinement)
 - **Resolution**: 1024x1536
-- **Best for**: Rapid iteration, previewing prompts, batch generation
+- **Gen time**: ~15s for 5s video (BF16)
 
 ### hq
 
-Highest quality. Uses a second-order res_2s sampler that achieves better quality in fewer steps, at 1080p resolution.
+Highest quality. Uses res_2s second-order sampler at 1080p.
 
 - **Steps**: 15 (stage 1) + 4 (stage 2 refinement)
-- **Resolution**: 1088x1920 (1080p)
-- **Best for**: Maximum quality, final renders, showcase content
+- **Resolution**: 1088x1920
+- **Gen time**: ~40s for 2s video (BF16)
+
+### a2vid
+
+Audio-conditioned video generation. Text prompt guides visuals, audio guides temporal dynamics.
+
+- **Steps**: 30 (stage 1) + 4 (stage 2 refinement)
+- **Resolution**: 1024x1536
+- **Gen time**: ~71s for 5s video (BF16)
+- **Requires**: Stereo WAV audio file
+
+### keyframe
+
+Interpolate between keyframe images with smooth transitions.
+
+- **Steps**: 30 (stage 1) + 4 (stage 2 refinement)
+- **Resolution**: 1024x1536
+- **Gen time**: ~85s for 5s video (BF16)
+- **Requires**: 2+ keyframe images with frame indices
+
+### retake
+
+Regenerate a specific time region of an existing video.
+
+- **Steps**: 40 (single stage, no upscaling)
+- **Resolution**: matches source video
+- **Gen time**: ~1490s for 10s video (BF16) — slow by design
+- **Requires**: Source video + time range
 
 ## CLI Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--prompt` | *(required)* | Text description of the desired video |
-| `--mode` | `standard` | Generation mode: `standard`, `fast`, or `hq` |
+| `--mode` | `standard` | Mode: `standard`, `fast`, `hq` |
+| `--precision` | `bf16` | Precision: `bf16` or `fp8` |
 | `--seed` | `42` | Random seed for reproducibility |
-| `--num-frames` | `121` | Number of frames (see duration table below) |
+| `--num-frames` | `121` | Number of frames (see duration table) |
 | `--frame-rate` | `24.0` | Playback FPS |
-| `--height` | auto | Output height in pixels (divisible by 64) |
-| `--width` | auto | Output width in pixels (divisible by 64) |
+| `--height` | auto | Output height (divisible by 64) |
+| `--width` | auto | Output width (divisible by 64) |
 | `--num-inference-steps` | auto | Denoising steps (auto per mode) |
 | `--num-videos` | `1` | Generate multiple videos (increments seed) |
-| `--image` | | Path to conditioning image for image-to-video |
-| `--enhance-prompt` | `false` | Let Gemma 3 expand your prompt with cinematic detail |
+| `--image` | | Path to conditioning image |
+| `--enhance-prompt` | `false` | Let Gemma 3 expand your prompt |
 
-### Auto Defaults by Mode
+## Precision
 
-| Setting | standard | fast | hq |
-|---------|----------|------|-----|
-| Resolution | 1024x1536 | 1024x1536 | 1088x1920 |
-| Steps | 30 | 8 (fixed) | 15 |
-| CFG guidance | 3.0 | none | 3.0 |
-| STG guidance | 1.0 | none | disabled |
-| Rescale | 0.7 | none | 0.45 |
+| Precision | Speed | Quality | VRAM per transformer |
+|-----------|-------|---------|---------------------|
+| **bf16** (default) | Faster | Full precision | ~44 GB |
+| **fp8** | Slower (cast overhead) | Slight loss | ~22 GB |
+
+BF16 is recommended on H200. FP8 is only needed if VRAM-constrained.
 
 ## Duration & Frame Count
 
-Duration = `num_frames / frame_rate`. Frames must be **8k+1** format (the model's temporal compression requires this).
+Duration = `num_frames / frame_rate`. Frames must be **8k+1** format.
 
-| num_frames | Duration @24fps | Notes |
-|-----------|-----------------|-------|
-| 49 | 2.0s | Quick test |
-| 73 | 3.0s | |
-| 97 | 4.0s | |
-| **121** | **5.0s** | **Default** |
-| 145 | 6.0s | |
-| 169 | 7.0s | |
-| 193 | 8.0s | |
-| 241 | 10.0s | |
-| 481 | 20.0s | Max tested |
+| num_frames | Duration @24fps |
+|-----------|-----------------|
+| 49 | 2.0s |
+| 73 | 3.0s |
+| 97 | 4.0s |
+| **121** | **5.0s (default)** |
+| 145 | 6.0s |
+| 193 | 8.0s |
+| 241 | 10.0s |
+| 481 | 20.0s |
 
-If you pass a non-valid frame count, it auto-rounds up to the nearest valid value.
+Non-valid frame counts auto-round up to the nearest valid value.
 
 ## Resolution
 
-Height and width must be divisible by **64** (two-stage pipeline requires this since stage 1 runs at half resolution).
+Height and width must be divisible by **64**.
 
-| Preset | Height x Width | Notes |
-|--------|---------------|-------|
-| **Default** | 1024 x 1536 | Standard/fast landscape |
-| **HQ** | 1088 x 1920 | 1080p, auto for hq mode |
+| Preset | Resolution | Notes |
+|--------|-----------|-------|
+| Default | 1024 x 1536 | standard/fast landscape |
+| HQ | 1088 x 1920 | Auto for hq mode |
 | Portrait | 1536 x 1024 | Swap height/width |
 | Square | 1024 x 1024 | |
 
-Higher resolution = more VRAM for VAE decode. All tested resolutions work up to 20s (481 frames) on H200.
-
 ## Prompting Guide
 
-Write prompts as a **single flowing paragraph** in **present tense**, 4–8 sentences. Think like a cinematographer describing a shot list. Keep within 200 words.
+Write prompts as a **single flowing paragraph** in **present tense**, 4-8 sentences. Think like a cinematographer describing a shot list. Keep within 200 words.
 
-### Six Elements of a Good Prompt
+### Structure
 
-1. **Shot establishment** — Set the shot scale and visual style using cinematography terms. ("Close-up", "wide establishing shot", "over-the-shoulder")
-
-2. **Scene setting** — Describe lighting, color palette, textures, and atmosphere. ("Golden hour light filters through dusty warehouse windows, warm amber tones on weathered concrete")
-
-3. **Action** — Present the core action as a natural sequence from start to finish. Use present tense verbs. ("She reaches for the door handle, pauses, then pushes it open")
-
-4. **Character definition** — Specify age, hairstyle, clothing, features. Convey emotion through **physical cues, not abstract labels** — "her jaw tightens and she narrows her eyes" instead of "she looks angry".
-
-5. **Camera movement** — Specify how and when the camera moves. Describe what the subject looks like after the movement. ("The camera slowly dollies in as she turns toward the lens, her expression shifting from concern to relief")
-
-6. **Audio** — Describe ambient sound, music, dialogue (in quotation marks). Specify language/accent if relevant. ("Distant thunder rumbles, rain patters on metal rooftops")
+1. **Shot establishment** — Camera angle and scale ("Close-up", "wide establishing shot")
+2. **Scene setting** — Lighting, color palette, atmosphere
+3. **Action** — Core action as a natural sequence, present tense
+4. **Character definition** — Age, clothing, features. Show emotion through physical cues, not labels
+5. **Camera movement** — How and when the camera moves
+6. **Audio** — Ambient sound, music, dialogue
 
 ### What Works Well
 
-- Cinematic compositions with thoughtful lighting and shallow depth of field
-- Strong emotional expressions with subtle gestures and facial nuance
-- Atmospheric elements: fog, mist, golden-hour light, rain, reflections
-- Explicit camera instructions: "slow dolly in", "handheld tracking", "static wide shot"
-- Stylized aesthetics: painterly, noir, analog film, fashion editorial
-- Characters can talk and sing (multiple languages supported)
-- Pacing cues: slow motion, time-lapse, lingering shot, continuous shot
+- Cinematic compositions with thoughtful lighting
+- Strong emotional expressions with subtle gestures
+- Atmospheric elements: fog, mist, golden-hour light, rain
+- Explicit camera instructions: "slow dolly in", "handheld tracking"
+- Characters can talk and sing (multiple languages)
 
 ### What to Avoid
 
-- **Abstract emotions** — don't say "sad" or "happy", show it physically
-- **Text and logos** — readable text is unreliable
-- **Complex physics** — chaotic motion creates artifacts (dancing is fine)
-- **Overloaded scenes** — too many characters or simultaneous actions
-- **Conflicting lighting** — e.g. "bright sunlight" and "dark moody shadows"
-- **Overcomplicated prompts** — start simple, layer complexity gradually
+- Abstract emotions ("sad", "happy") — show it physically
+- Text and logos — unreliable
+- Overloaded scenes — too many characters or simultaneous actions
+- Conflicting lighting descriptions
 
-### Useful Vocabulary
+### Example
 
-**Camera:** follows, tracks, pans across, circles around, tilts upward, pushes in, pulls back, overhead view, handheld, static frame
+**Good:**
+> A woman in a red dress walks along a rain-soaked city street at night. Neon signs in blues and pinks reflect off the wet pavement. She pauses to look up at a flickering sign, her face illuminated by its glow. The camera tracks alongside her at eye level, slowly pushing in as she turns toward the lens. Shallow depth of field blurs the background traffic into soft bokeh.
 
-**Lighting:** flickering candles, neon glow, natural sunlight, dramatic shadows, backlighting, rim light
-
-**Atmosphere:** fog, rain, dust, smoke, particles, mist
-
-**Pacing:** slow motion, time-lapse, rapid cuts, lingering shot, freeze-frame, seamless transition
-
-**Style:** stop-motion, 2D/3D animation, claymation, comic book, cyberpunk, film noir, documentary, surreal, minimalist, painterly
-
-### Examples
-
-**Good — detailed, chronological, visual:**
-> A woman in a red dress walks along a rain-soaked city street at night. Neon signs in blues and pinks reflect off the wet pavement. She pauses to look up at a flickering sign, her face illuminated by its glow. The camera tracks alongside her at eye level, slowly pushing in as she turns toward the lens. Shallow depth of field blurs the background traffic into soft bokeh. Distant car horns and the hum of a bass-heavy song drift from a nearby bar.
-
-**Bad — vague, tag-based:**
+**Bad:**
 > Beautiful woman walking in city, cinematic, 4K, highly detailed
 
-**Short but effective (with `--enhance-prompt`):**
-> a dog playing in snow
+## Python API
 
-The `--enhance-prompt` flag lets Gemma 3 automatically expand a short prompt into a detailed cinematic description. Good for quick iteration when you have a rough idea.
-
-## Image-to-Video
-
-Animate a still image. The image conditions the first frame — the model generates motion from there.
-
-```bash
-# CLI
-uv run modal run generate_video.py \
-    --prompt "She slowly turns her head and smiles, a breeze moves her hair" \
-    --image photo.jpg \
-    --mode fast
-
-# Python API
-result = ltx.generate.remote(
-    prompt="She slowly turns her head and smiles",
-    image_bytes=open("photo.jpg", "rb").read(),
-    image_strength=1.0,  # 0.0–1.0, higher = more faithful to input image
-    mode="fast",
-)
-```
-
-**Tips:**
-- `image_strength=1.0` (default) closely matches the input image
-- Lower values (0.5-0.8) give the model more creative freedom
-- The image is placed at frame 0 — the model generates forward from it
-- Works with any mode (standard, fast, hq)
-
-## Python API — Advanced Features
-
-The CLI covers text-to-video and image-to-video. For audio-to-video, keyframe interpolation, and retake, use the Python API:
-
-### Audio-to-Video
-
-Generate video synchronized to an audio track. The model generates visuals that match the audio's rhythm and mood.
+### Text/Image-to-Video
 
 ```python
 from generate_video import LTXVideo
 
-ltx = LTXVideo()
+ltx = LTXVideo(mode="standard")  # or "fast", "hq"
+result = ltx.generate.remote(
+    prompt="A timelapse of a flower blooming in morning light",
+    seed=42,
+    num_frames=121,
+    # Optional:
+    image_bytes=open("flower.png", "rb").read(),  # image-to-video
+    image_strength=1.0,  # 0.0-1.0
+    enhance_prompt=False,
+)
+with open("output.mp4", "wb") as f:
+    f.write(result["video_bytes"])
+```
+
+### Audio-to-Video
+
+```python
+ltx = LTXVideo(mode="a2vid")
 result = ltx.generate_from_audio.remote(
-    prompt="A guitarist shreds a solo on stage, colorful lights flash and pulse",
-    audio_bytes=open("music.wav", "rb").read(),
-    num_frames=121,                # 5 seconds
+    prompt="A guitarist shreds a solo on stage, colorful lights flash",
+    audio_bytes=open("music.wav", "rb").read(),  # must be stereo WAV
+    num_frames=121,
     seed=42,
     # Optional:
-    audio_start_time=0.0,          # offset into audio file (seconds)
-    audio_max_duration=None,       # cap audio length
-    image_bytes=None,              # optional first-frame image
+    audio_start_time=0.0,
+    audio_max_duration=None,
+    image_bytes=None,  # optional first-frame conditioning
 )
 ```
 
-**Requirements:** Audio must be **stereo WAV** (2 channels). The model's audio VAE expects stereo input.
-
 ### Keyframe Interpolation
 
-Generate smooth video transitions between two or more keyframe images.
-
 ```python
+ltx = LTXVideo(mode="keyframe")
 result = ltx.interpolate.remote(
-    prompt="A smooth transition from day to night, the sky shifts from warm orange to deep blue",
+    prompt="A smooth transition from day to night",
     keyframe_images=[
-        (open("sunrise.jpg", "rb").read(), 0, 1.0),      # frame 0, full strength
-        (open("sunset.jpg", "rb").read(), 120, 1.0),      # frame 120, full strength
+        (open("sunrise.jpg", "rb").read(), 0, 1.0),     # frame 0
+        (open("sunset.jpg", "rb").read(), 120, 1.0),     # frame 120
     ],
     num_frames=121,
     seed=42,
 )
 ```
 
-Each keyframe is a tuple of `(image_bytes, frame_index, strength)`.
-
 ### Retake (Video Editing)
-
-Regenerate a specific time region of an existing video while preserving the rest.
 
 ```python
 # Generate base video
-base = ltx.generate.remote(
+fast = LTXVideo(mode="fast")
+base = fast.generate.remote(
     prompt="A woman walks down a city street at night",
-    mode="fast",
-    num_frames=241,  # 10 seconds
+    num_frames=241,
     seed=99,
 )
 
-# Retake a section with a different prompt
-result = ltx.retake.remote(
+# Retake a section
+retake = LTXVideo(mode="retake")
+result = retake.retake.remote(
     video_bytes=base["video_bytes"],
-    prompt="A monster crashes through buildings on a city street",
+    prompt="A monster crashes through buildings",
     start_time=3.0,
     end_time=8.0,
     seed=200,
-    # Optional:
-    regenerate_video=True,     # regenerate video in the time region
-    regenerate_audio=True,     # regenerate audio in the time region
-    num_inference_steps=40,    # retake uses 40 steps by default
+    regenerate_video=True,
+    regenerate_audio=True,
 )
 ```
 
-**Note:** Retake is slow (~8 min for a 10s video) because it runs the full model at 40 steps on the entire video at source resolution. The temporal mask controls which frames get regenerated.
-
-### List Generated Videos
+### Custom Precision
 
 ```python
-videos = ltx.list_outputs.remote()
-# Returns: [{"filename": "...", "size_mb": 1.5, "metadata": {...}}, ...]
+# FP8 for lower VRAM usage
+ltx = LTXVideo(mode="fast", precision="fp8")
+result = ltx.generate.remote(prompt="...", seed=42)
 ```
 
-Videos auto-save to the `ltx-outputs` Modal volume. Access directly:
+## Guidance Parameters (Advanced)
+
+Only relevant for `standard` and `hq` modes. `fast` mode ignores them.
+
+| Parameter | Standard | HQ | Effect |
+|-----------|----------|-----|--------|
+| `cfg_scale` | 3.0 | 3.0 | Prompt adherence (1.0-5.0) |
+| `stg_scale` | 1.0 | 0.0 | Spatio-temporal coherence (0.0-1.5) |
+| `rescale_scale` | 0.7 | 0.45 | Prevents over-saturation (0.0-1.0) |
+
+```python
+ltx = LTXVideo(mode="standard")
+result = ltx.generate.remote(
+    prompt="...",
+    cfg_scale=4.0,
+    stg_scale=0.5,
+    rescale_scale=0.5,
+)
+```
+
+## Performance (H200, BF16, persistent models)
+
+| Mode | 2s (49f) | 5s (121f) | 10s (241f) |
+|------|----------|-----------|------------|
+| **fast** | ~33s | ~15s | ~38s |
+| **standard** | — | ~71s | — |
+| **hq** | ~40s | — | — |
+| **a2vid** | — | ~71s | — |
+| **keyframe** | — | ~85s | — |
+| **retake** | — | — | ~1490s |
+
+Cost: H200 at $4.54/hr (billed per second). Typical 5s fast video: ~$0.02.
+
+Containers scale to zero when idle (after 15 min `scaledown_window`). Cold start adds model loading time on first request.
+
+## Output Volume
+
+Videos auto-save to the `ltx-outputs` Modal volume with timestamped filenames and JSON metadata.
+
 ```bash
 modal volume ls ltx-outputs
 modal volume get ltx-outputs <filename> ./local.mp4
 ```
 
-## Web API
-
-After deploying with `uv run modal deploy generate_video.py`:
-
-**Generate video:**
-```
-GET /api_generate?prompt=A+cat+on+a+windowsill&mode=fast&num_frames=121&seed=42
-→ Returns MP4 file
-```
-
-**List saved videos:**
-```
-GET /api_list
-→ Returns JSON array
-```
-
-Swagger docs at: `<endpoint-url>/docs`
-
-## Guidance Parameters (Advanced)
-
-These control the diffusion process. Only relevant for `standard` and `hq` modes — `fast` mode ignores them.
-
-| Parameter | Default (standard) | Default (hq) | Range | Effect |
-|-----------|-------------------|-------------|-------|--------|
-| `cfg_scale` | 3.0 | 3.0 | 1.0–5.0 | Prompt adherence. Higher = more literal, but less natural motion |
-| `stg_scale` | 1.0 | 0.0 | 0.0–1.5 | Spatio-temporal coherence. Perturbs transformer blocks for better consistency |
-| `rescale_scale` | 0.7 | 0.45 | 0.0–1.0 | Prevents over-saturation from strong guidance |
-| `modality_scale` | 3.0 | 3.0 | 1.0–5.0 | Audio-visual sync. Set to 1.0 if you don't care about audio |
-| `stg_blocks` | [28] | [] | — | Which transformer block to perturb for STG |
-
-**Audio guidance** uses `cfg_scale=7.0` (higher than video) for stronger prompt adherence in audio generation.
-
-Pass via Python API:
-```python
-result = ltx.generate.remote(
-    prompt="...",
-    mode="standard",
-    cfg_scale=4.0,       # stronger prompt adherence
-    stg_scale=0.5,       # less temporal guidance
-    rescale_scale=0.5,   # less rescaling
-)
-```
-
-## Performance
-
-Tested on NVIDIA H200 (141 GB), FP8 quantization.
-
-### Generation Speed (warm container)
-
-| Mode | 2s (49f) | 5s (121f) | 10s (241f) | 20s (481f) |
-|------|----------|-----------|------------|------------|
-| **fast** | ~50s | ~50s | ~97s | ~159s |
-| **standard** | ~136s | ~162s | — | — |
-| **hq** | ~82s | — | — | — |
-
-~50-55s of each call is model loading overhead (see NOTES.md for optimization roadmap).
-
-### Cost
-
-- H200: ~$4.85/hr (billed per second on Modal)
-- Typical 5s video: ~$0.04 (warm, fast) / ~$0.12 (cold start)
-
-## Feature Comparison with Official LTX API
-
-| Feature | Our Modal App | Official LTX API |
-|---------|--------------|------------------|
-| Text-to-video | Yes (3 modes) | Yes (fast/pro) |
-| Image-to-video | Yes | Yes |
-| Audio-to-video | Yes | Yes (pro only) |
-| Keyframe interpolation | Yes | Yes (ltx-2-3 only) |
-| Retake (edit regions) | Yes | Yes (pro only) |
-| Extend (lengthen video) | **No** | Yes (pro only) |
-| Camera motion presets | **No** (use prompt) | Yes (dolly, jib, static) |
-| 4K resolution | **No** (max 1080p) | Yes |
-| Max duration | 20s tested | 20s |
-| Prompt enhancement | Yes | Not documented |
-| Custom guidance params | Yes (full control) | Limited |
-| Seed reproducibility | Yes | Yes |
-| Batch generation | Yes | No |
-| Self-hosted | Yes (your GPU) | No (their cloud) |
-
 ## Running Tests
 
 ```bash
-# Run all 8 tests in parallel (each on its own H200)
+# Run all 8 tests in parallel
 uv run modal run test_all_modes.py::run_tests
 
-# Run a specific test
-uv run modal run test_all_modes.py::run_tests --test 1
+# Run specific test
+uv run modal run test_all_modes.py::run_tests --test 2
 
-# Tests:
-#   1. standard mode (text-to-video, 5s)
-#   2. fast mode (text-to-video, 5s)
-#   3. hq mode (text-to-video, 2s, 1080p)
-#   4. image-to-video (real photo)
-#   5. enhance_prompt
-#   6. audio-to-video (real audio)
-#   7. keyframe interpolation (real photos)
-#   8. retake (generate base + retake region)
+# Run with FP8 precision
+uv run modal run test_all_modes.py::run_tests --precision fp8
 ```
 
 Tests 4, 6, 7 require test assets in the project directory:
