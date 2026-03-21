@@ -1,25 +1,31 @@
 """
-LTX-2.3 Video Generation on Modal (H200, FP8).
+LTX-2.3 Video Generation on Modal — Parametrized by Mode.
+
+Each (mode, precision) combination runs in its own container pool,
+loading only the models that mode requires.
 
 Modes:
   standard — 30-step diffusion + 2x upscale, best quality (1024x1536)
   fast     — distilled 8+4 steps, ~2x faster (1024x1536)
   hq       — res_2s sampler, 15 steps, 1080p (1088x1920)
-
-Features:
-  text-to-video | image-to-video | audio-to-video
-  keyframe interpolation | video retake (edit time regions)
+  a2vid    — audio-conditioned video generation (1024x1536)
+  keyframe — interpolation between keyframe images (1024x1536)
+  retake   — regenerate a time region of existing video
 
 Usage:
-    uv run modal run generate_video.py --prompt "A cat sitting on a windowsill"
-    uv run modal run generate_video.py --prompt "..." --mode fast
-    uv run modal run generate_video.py --prompt "..." --mode hq
-    uv run modal run generate_video.py --prompt "..." --num-frames 241      # 10s
-    uv run modal run generate_video.py --prompt "..." --image photo.jpg     # image-to-video
-    uv run modal run generate_video.py --prompt "..." --enhance-prompt      # auto-enhance
-    uv run modal deploy generate_video.py                                   # web API
+    # CLI
+    uv run modal run generate_video.py --mode standard --prompt "A cat on a windowsill"
+    uv run modal run generate_video.py --mode fast --prompt "..." --precision fp8
+    uv run modal run generate_video.py --mode a2vid --prompt "..." --audio audio.wav
 
-See docs.md for full parameter reference, prompting guide, and Python API examples.
+    # Deploy API
+    uv run modal deploy generate_video.py
+
+    # API (mode & precision are query params, routed to separate container pools)
+    POST /generate?mode=standard  {"prompt": "..."}
+    POST /generate?mode=a2vid                   {"prompt": "...", "audio_base64": "..."}
+    POST /generate?mode=keyframe                {"prompt": "...", "keyframes": [...]}
+    POST /generate?mode=retake                  {"prompt": "...", "video_base64": "...", ...}
 """
 
 import modal
@@ -34,12 +40,6 @@ OUTPUT_DIR = "/outputs"
 LTX_DIR = f"{MODEL_DIR}/ltx"
 GEMMA_DIR = f"{MODEL_DIR}/gemma"
 
-LTX_FILES = [
-    "ltx-2.3-22b-dev.safetensors",
-    "ltx-2.3-22b-distilled.safetensors",
-    "ltx-2.3-22b-distilled-lora-384.safetensors",
-    "ltx-2.3-spatial-upscaler-x2-1.0.safetensors",
-]
 
 hf_secret = modal.Secret.from_name("huggingface-secret")
 
@@ -75,7 +75,7 @@ def _snap_frames(n: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Main class — all pipelines, one container
+# Parametrized class — each (mode, precision) gets its own container pool
 # ---------------------------------------------------------------------------
 
 
@@ -88,29 +88,23 @@ def _snap_frames(n: int) -> int:
     scaledown_window=15 * 60,
 )
 class LTXVideo:
+    mode: str = modal.parameter()
+    precision: str = modal.parameter(default="bf16")
+
     @modal.enter()
     def setup(self):
-        import time
-
         import torch
 
-        for attempt in range(10):
-            try:
-                torch.cuda.init()
-                break
-            except RuntimeError:
-                if attempt < 9:
-                    time.sleep(2)
-                else:
-                    raise
-        torch.cuda.set_device(0)
         torch.set_float32_matmul_precision("high")
         print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"Mode: {self.mode} | Precision: {self.precision}")
 
         self._ensure_models()
-        self._create_pipelines()
+        self._create_pipeline()
         self._load_persistent_models()
-        print("All models loaded and ready.")
+
+        vram = torch.cuda.memory_allocated() / 1024**3
+        print(f"Ready. VRAM used by persistent models: {vram:.1f} GB")
 
     def _ensure_models(self):
         import os
@@ -119,7 +113,22 @@ class LTXVideo:
         from huggingface_hub import hf_hub_download, snapshot_download
 
         os.makedirs(LTX_DIR, exist_ok=True)
-        for f in LTX_FILES:
+        need_dev = self.mode in ("standard", "hq", "a2vid", "keyframe", "retake")
+        need_dist = self.mode == "fast"
+        need_lora = self.mode in ("standard", "hq", "a2vid", "keyframe")
+        need_upscaler = self.mode != "retake"
+
+        files = []
+        if need_dev:
+            files.append("ltx-2.3-22b-dev.safetensors")
+        if need_dist:
+            files.append("ltx-2.3-22b-distilled.safetensors")
+        if need_lora:
+            files.append("ltx-2.3-22b-distilled-lora-384.safetensors")
+        if need_upscaler:
+            files.append("ltx-2.3-spatial-upscaler-x2-1.0.safetensors")
+
+        for f in files:
             if not (Path(LTX_DIR) / f).exists():
                 print(f"Downloading {f}...")
                 hf_hub_download("Lightricks/LTX-2.3", f, local_dir=LTX_DIR)
@@ -134,16 +143,15 @@ class LTXVideo:
 
         model_volume.commit()
 
-    def _create_pipelines(self):
-        """Create pipeline objects — these are lightweight config holders.
-        Actual model weights load on-demand during generation."""
+    def _create_pipeline(self):
+        """Create only the pipeline for self.mode."""
         from ltx_core.loader import (
             LTXV_LORA_COMFY_RENAMING_MAP,
             LoraPathStrengthAndSDOps,
         )
         from ltx_core.quantization import QuantizationPolicy
 
-        quant = QuantizationPolicy.fp8_cast()
+        quant = QuantizationPolicy.fp8_cast() if self.precision == "fp8" else None
         dev_ckpt = f"{LTX_DIR}/ltx-2.3-22b-dev.safetensors"
         dist_ckpt = f"{LTX_DIR}/ltx-2.3-22b-distilled.safetensors"
         upscaler = f"{LTX_DIR}/ltx-2.3-spatial-upscaler-x2-1.0.safetensors"
@@ -164,16 +172,20 @@ class LTXVideo:
             **shared,
         )
 
-        from ltx_pipelines.a2vid_two_stage import A2VidPipelineTwoStage
-        from ltx_pipelines.distilled import DistilledPipeline
-        from ltx_pipelines.keyframe_interpolation import KeyframeInterpolationPipeline
-        from ltx_pipelines.retake import RetakePipeline
-        from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
-        from ltx_pipelines.ti2vid_two_stages_hq import TI2VidTwoStagesHQPipeline
-
-        self._pipelines = {
-            "standard": TI2VidTwoStagesPipeline(**two_stage),
-            "hq": TI2VidTwoStagesHQPipeline(
+        if self.mode == "standard":
+            from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
+            self._pipeline = TI2VidTwoStagesPipeline(**two_stage)
+        elif self.mode == "fast":
+            from ltx_pipelines.distilled import DistilledPipeline
+            self._pipeline = DistilledPipeline(
+                distilled_checkpoint_path=dist_ckpt,
+                spatial_upsampler_path=upscaler,
+                loras=[],
+                **shared,
+            )
+        elif self.mode == "hq":
+            from ltx_pipelines.ti2vid_two_stages_hq import TI2VidTwoStagesHQPipeline
+            self._pipeline = TI2VidTwoStagesHQPipeline(
                 checkpoint_path=dev_ckpt,
                 distilled_lora=dist_lora,
                 distilled_lora_strength_stage_1=0.25,
@@ -181,73 +193,30 @@ class LTXVideo:
                 spatial_upsampler_path=upscaler,
                 loras=(),
                 **shared,
-            ),
-            "fast": DistilledPipeline(
-                distilled_checkpoint_path=dist_ckpt,
-                spatial_upsampler_path=upscaler,
-                loras=[],
-                **shared,
-            ),
-            "a2vid": A2VidPipelineTwoStage(**two_stage),
-            "keyframe": KeyframeInterpolationPipeline(**two_stage),
-            "retake": RetakePipeline(
+            )
+        elif self.mode == "a2vid":
+            from ltx_pipelines.a2vid_two_stage import A2VidPipelineTwoStage
+            self._pipeline = A2VidPipelineTwoStage(**two_stage)
+        elif self.mode == "keyframe":
+            from ltx_pipelines.keyframe_interpolation import KeyframeInterpolationPipeline
+            self._pipeline = KeyframeInterpolationPipeline(**two_stage)
+        elif self.mode == "retake":
+            from ltx_pipelines.retake import RetakePipeline
+            self._pipeline = RetakePipeline(
                 checkpoint_path=dev_ckpt, loras=[], **shared
-            ),
-        }
+            )
+        else:
+            raise ValueError(f"Unknown mode: {self.mode}")
 
     def _load_persistent_models(self):
-        """Build all models once, then patch each pipeline's ModelLedger
-        to return the pre-built models instead of rebuilding from disk.
+        """Build models once and patch the pipeline's ModelLedger(s) to
+        return pre-built GPU-resident models instead of rebuilding from disk.
 
-        Pipeline code runs completely unchanged — it calls ledger.transformer(),
-        ledger.video_decoder(), etc. as before. The only difference is that
-        these now return persistent GPU-resident models instead of fresh builds.
-
-        VRAM: ~102GB (3 transformers + Gemma + VAEs). HQ mode's transformers
-        (LoRA at 0.25/0.5) are NOT pre-built — they'd push past 141GB.
-        HQ builds its transformers fresh (~15s each) but shares everything else.
+        Only loads what this mode needs — no wasted VRAM.
         """
         import torch
-        from ltx_pipelines.utils.model_ledger import ModelLedger
 
-        # --- Build shared components from dev checkpoint ---
-        dev_ledger = self._pipelines["standard"].stage_1_model_ledger
-
-        print("Loading text encoder (Gemma 3 12B)...")
-        text_encoder = dev_ledger.text_encoder()
-        print("Loading spatial upsampler...")
-        upsampler = dev_ledger.spatial_upsampler()
-
-        print("Loading dev checkpoint components...")
-        dev_emb = dev_ledger.gemma_embeddings_processor()
-        dev_venc = dev_ledger.video_encoder()
-        dev_vdec = dev_ledger.video_decoder()
-        dev_aenc = dev_ledger.audio_encoder()
-        dev_adec = dev_ledger.audio_decoder()
-        dev_voc = dev_ledger.vocoder()
-
-        # --- Build distilled checkpoint components ---
-        dist_ledger = self._pipelines["fast"].model_ledger
-
-        print("Loading distilled checkpoint components...")
-        dist_emb = dist_ledger.gemma_embeddings_processor()
-        dist_venc = dist_ledger.video_encoder()
-        dist_vdec = dist_ledger.video_decoder()
-        dist_aenc = dist_ledger.audio_encoder()
-        dist_adec = dist_ledger.audio_decoder()
-        dist_voc = dist_ledger.vocoder()
-
-        # --- Build transformers (3 variants, 22GB each) ---
-        print("Loading dev transformer...")
-        dev_xfmr = dev_ledger.transformer()
-        print("Loading dev+lora transformer...")
-        dev_lora_xfmr = self._pipelines["standard"].stage_2_model_ledger.transformer()
-        print("Loading distilled transformer...")
-        dist_xfmr = dist_ledger.transformer()
-
-        # --- Patch all ledgers to return pre-built models ---
-
-        def patch(ledger, *, text_enc, emb, venc, vdec, aenc, adec, voc, ups, xfmr=None):
+        def patch(ledger, *, text_enc, emb, venc, vdec, aenc, adec, voc, ups=None, xfmr=None):
             """Replace a ModelLedger's factory methods with cached returns."""
             ledger.text_encoder = lambda te=text_enc: te
             ledger.gemma_embeddings_processor = lambda e=emb: e
@@ -256,38 +225,71 @@ class LTXVideo:
             ledger.audio_encoder = lambda a=aenc: a
             ledger.audio_decoder = lambda a=adec: a
             ledger.vocoder = lambda v=voc: v
-            ledger.spatial_upsampler = lambda u=ups: u
+            if ups is not None:
+                ledger.spatial_upsampler = lambda u=ups: u
             if xfmr is not None:
                 ledger.transformer = lambda x=xfmr: x
 
-        dev_kw = dict(text_enc=text_encoder, emb=dev_emb, venc=dev_venc,
-                      vdec=dev_vdec, aenc=dev_aenc, adec=dev_adec,
-                      voc=dev_voc, ups=upsampler)
+        if self.mode == "fast":
+            ledger = self._pipeline.model_ledger
+            print("Loading text encoder (Gemma 3 12B)...")
+            text_enc = ledger.text_encoder()
+            print("Loading spatial upsampler...")
+            ups = ledger.spatial_upsampler()
+            print("Loading distilled components...")
+            emb = ledger.gemma_embeddings_processor()
+            venc = ledger.video_encoder()
+            vdec = ledger.video_decoder()
+            aenc = ledger.audio_encoder()
+            adec = ledger.audio_decoder()
+            voc = ledger.vocoder()
+            print("Loading distilled transformer...")
+            xfmr = ledger.transformer()
+            patch(ledger, text_enc=text_enc, emb=emb, venc=venc, vdec=vdec,
+                  aenc=aenc, adec=adec, voc=voc, ups=ups, xfmr=xfmr)
 
-        # Standard: stage 1 = dev, stage 2 = dev+lora
-        patch(self._pipelines["standard"].stage_1_model_ledger, **dev_kw, xfmr=dev_xfmr)
-        patch(self._pipelines["standard"].stage_2_model_ledger, **dev_kw, xfmr=dev_lora_xfmr)
+        elif self.mode == "retake":
+            ledger = self._pipeline.model_ledger
+            print("Loading text encoder (Gemma 3 12B)...")
+            text_enc = ledger.text_encoder()
+            print("Loading dev components...")
+            emb = ledger.gemma_embeddings_processor()
+            venc = ledger.video_encoder()
+            vdec = ledger.video_decoder()
+            aenc = ledger.audio_encoder()
+            adec = ledger.audio_decoder()
+            voc = ledger.vocoder()
+            print("Loading dev transformer...")
+            xfmr = ledger.transformer()
+            patch(ledger, text_enc=text_enc, emb=emb, venc=venc, vdec=vdec,
+                  aenc=aenc, adec=adec, voc=voc, xfmr=xfmr)
 
-        # A2vid, keyframe: same transformers as standard
-        patch(self._pipelines["a2vid"].stage_1_model_ledger, **dev_kw, xfmr=dev_xfmr)
-        patch(self._pipelines["a2vid"].stage_2_model_ledger, **dev_kw, xfmr=dev_lora_xfmr)
-        patch(self._pipelines["keyframe"].stage_1_model_ledger, **dev_kw, xfmr=dev_xfmr)
-        patch(self._pipelines["keyframe"].stage_2_model_ledger, **dev_kw, xfmr=dev_lora_xfmr)
+        else:
+            # Two-stage pipelines: standard, hq, a2vid, keyframe
+            s1_ledger = self._pipeline.stage_1_model_ledger
+            s2_ledger = self._pipeline.stage_2_model_ledger
 
-        # Retake: dev transformer, no LoRA
-        patch(self._pipelines["retake"].model_ledger, **dev_kw, xfmr=dev_xfmr)
+            print("Loading text encoder (Gemma 3 12B)...")
+            text_enc = s1_ledger.text_encoder()
+            print("Loading spatial upsampler...")
+            ups = s1_ledger.spatial_upsampler()
+            print("Loading dev components...")
+            emb = s1_ledger.gemma_embeddings_processor()
+            venc = s1_ledger.video_encoder()
+            vdec = s1_ledger.video_decoder()
+            aenc = s1_ledger.audio_encoder()
+            adec = s1_ledger.audio_decoder()
+            voc = s1_ledger.vocoder()
 
-        # HQ: shared components but NOT transformers (different LoRA strengths, won't fit in VRAM)
-        patch(self._pipelines["hq"].stage_1_model_ledger, **dev_kw)
-        patch(self._pipelines["hq"].stage_2_model_ledger, **dev_kw)
+            print("Loading stage 1 transformer...")
+            s1_xfmr = s1_ledger.transformer()
+            print("Loading stage 2 transformer...")
+            s2_xfmr = s2_ledger.transformer()
 
-        # Fast: distilled checkpoint
-        patch(dist_ledger, text_enc=text_encoder, emb=dist_emb, venc=dist_venc,
-              vdec=dist_vdec, aenc=dist_aenc, adec=dist_adec,
-              voc=dist_voc, ups=upsampler, xfmr=dist_xfmr)
-
-        vram = torch.cuda.memory_allocated() / 1024**3
-        print(f"VRAM used by persistent models: {vram:.1f} GB")
+            kw = dict(text_enc=text_enc, emb=emb, venc=venc, vdec=vdec,
+                      aenc=aenc, adec=adec, voc=voc, ups=ups)
+            patch(s1_ledger, **kw, xfmr=s1_xfmr)
+            patch(s2_ledger, **kw, xfmr=s2_xfmr)
 
     # -------------------------------------------------------------------
     # Helpers
@@ -330,11 +332,7 @@ class LTXVideo:
     def _encode_result(
         self, video, audio, num_frames, frame_rate, prompt, seed, save_name=None
     ):
-        """Encode video+audio to MP4, save to volume, return result dict.
-
-        IMPORTANT: video is a lazy iterator — the VAE decode happens here when
-        encode_video consumes it. We must stay inside no_grad/inference_mode.
-        """
+        """Encode video+audio to MP4, save to volume, return result dict."""
         import torch
         from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
         from ltx_pipelines.utils.media_io import encode_video
@@ -394,6 +392,8 @@ class LTXVideo:
                     "duration": round(duration, 2),
                     "size_mb": round(len(video_bytes) / 1024 / 1024, 2),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "mode": self.mode,
+                    "precision": self.precision,
                 },
                 f,
                 indent=2,
@@ -432,7 +432,6 @@ class LTXVideo:
     def generate(
         self,
         prompt: str,
-        mode: str = "standard",
         negative_prompt: str = "",
         seed: int = 42,
         height: int | None = None,
@@ -447,12 +446,7 @@ class LTXVideo:
         image_strength: float = 1.0,
         enhance_prompt: bool = False,
     ) -> dict:
-        """Text/image-to-video generation.
-
-        mode: standard (30 steps), fast (8+4 steps), hq (15 steps, res_2s sampler)
-        height/width: final output resolution (divisible by 64).
-            Defaults — standard/fast: 1024x1536, hq: 1088x1920
-        """
+        """Text/image-to-video generation (standard, fast, hq modes)."""
         import time
 
         import torch
@@ -462,8 +456,7 @@ class LTXVideo:
         images = self._prep_images(image_bytes, image_strength)
         tiling = TilingConfig.default()
 
-        # Mode-specific defaults
-        if mode == "hq":
+        if self.mode == "hq":
             height = height or 1088
             width = width or 1920
             num_inference_steps = num_inference_steps or 15
@@ -477,12 +470,12 @@ class LTXVideo:
             rescale_scale = rescale_scale if rescale_scale is not None else 0.7
 
         assert height % 64 == 0 and width % 64 == 0, (
-            f"height/width must be divisible by 64 for two-stage, got {height}x{width}"
+            f"height/width must be divisible by 64, got {height}x{width}"
         )
 
         dur = num_frames / frame_rate
         print(
-            f"generate [{mode}] {dur:.1f}s ({num_frames}f) "
+            f"generate [{self.mode}] {dur:.1f}s ({num_frames}f) "
             f"{width}x{height} steps={num_inference_steps} seed={seed}"
         )
         print(f"  prompt: {prompt[:120]}")
@@ -490,8 +483,8 @@ class LTXVideo:
         t0 = time.time()
 
         with torch.no_grad():
-            if mode == "fast":
-                video, audio = self._pipelines["fast"](
+            if self.mode == "fast":
+                video, audio = self._pipeline(
                     prompt=prompt,
                     seed=seed,
                     height=height,
@@ -503,8 +496,7 @@ class LTXVideo:
                     enhance_prompt=enhance_prompt,
                 )
             else:
-                pipeline = self._pipelines[mode]
-                video, audio = pipeline(
+                video, audio = self._pipeline(
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     seed=seed,
@@ -528,7 +520,7 @@ class LTXVideo:
         result = self._encode_result(
             video, audio, num_frames, frame_rate, prompt, seed
         )
-        result["mode"] = mode
+        result["mode"] = self.mode
         result["gen_time_s"] = round(gen_time, 1)
         print(
             f"  done in {gen_time:.0f}s | {result['size_mb']} MB | {result['filename']}"
@@ -556,7 +548,7 @@ class LTXVideo:
         audio_max_duration: float | None = None,
         enhance_prompt: bool = False,
     ) -> dict:
-        """Audio-driven video generation. Pass audio bytes (wav/mp3) to condition video."""
+        """Audio-driven video generation (a2vid mode)."""
         import time
 
         import torch
@@ -567,11 +559,11 @@ class LTXVideo:
 
         audio_path = self._write_temp(audio_bytes, ".wav")
 
-        # A2Vid uses list[tuple[str, int, float]] for images, not ImageConditioningInput
         images = []
         if image_bytes is not None:
+            from ltx_pipelines.utils.args import ImageConditioningInput
             img_path = self._write_temp(image_bytes, ".png")
-            images = [(img_path, 0, image_strength)]
+            images = [ImageConditioningInput(img_path, 0, image_strength, 33)]
 
         print(
             f"audio-to-video {num_frames / frame_rate:.1f}s "
@@ -580,7 +572,7 @@ class LTXVideo:
         t0 = time.time()
 
         with torch.no_grad():
-            video, audio = self._pipelines["a2vid"](
+            video, audio = self._pipeline(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
                 seed=seed,
@@ -626,7 +618,7 @@ class LTXVideo:
         rescale_scale: float = 0.7,
         enhance_prompt: bool = False,
     ) -> dict:
-        """Interpolate between keyframe images.
+        """Interpolate between keyframe images (keyframe mode).
 
         keyframe_images: list of (image_bytes, frame_idx, strength) tuples.
         Example: [(start_img, 0, 1.0), (end_img, 120, 1.0)]
@@ -644,7 +636,7 @@ class LTXVideo:
         t0 = time.time()
 
         with torch.no_grad():
-            video, audio = self._pipelines["keyframe"](
+            video, audio = self._pipeline(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
                 seed=seed,
@@ -688,7 +680,7 @@ class LTXVideo:
         regenerate_audio: bool = True,
         enhance_prompt: bool = False,
     ) -> dict:
-        """Regenerate a time region [start_time, end_time] of an existing video."""
+        """Regenerate a time region [start_time, end_time] of an existing video (retake mode)."""
         import time
 
         import torch
@@ -703,7 +695,7 @@ class LTXVideo:
         t0 = time.time()
 
         with torch.no_grad():
-            video, audio_tensor = self._pipelines["retake"](
+            video, audio_tensor = self._pipeline(
                 video_path=video_path,
                 prompt=prompt,
                 start_time=start_time,
@@ -721,7 +713,6 @@ class LTXVideo:
                 tiling_config=TilingConfig.default(),
             )
 
-        # Retake uses source video's frame count/rate
         from ltx_pipelines.utils.media_io import get_videostream_metadata
 
         fps, num_frames, _w, _h = get_videostream_metadata(video_path)
@@ -763,38 +754,131 @@ class LTXVideo:
     # Web API
     # -------------------------------------------------------------------
 
-    @modal.fastapi_endpoint(docs=True)
-    def api_generate(
-        self,
-        prompt: str,
-        mode: str = "standard",
-        seed: int = 42,
-        height: int | None = None,
-        width: int | None = None,
-        num_frames: int = 121,
-        frame_rate: float = 24.0,
-        num_inference_steps: int | None = None,
-        enhance_prompt: bool = False,
-    ):
-        """GET endpoint — returns MP4 video."""
+    @modal.fastapi_endpoint(method="POST", docs=True)
+    def api_generate(self, body: dict):
+        """POST endpoint — generates video based on the container's mode.
+
+        Body fields depend on mode:
+          standard/fast/hq: prompt, seed, height, width, num_frames, ...
+          a2vid: prompt, audio_base64, seed, ...
+          keyframe: prompt, keyframes [{image_base64, frame_idx, strength}], ...
+          retake: prompt, video_base64, start_time, end_time, ...
+
+        Returns MP4 video bytes.
+        """
+        import base64
+
         from fastapi.responses import Response
 
-        result = self.generate.local(
-            prompt=prompt,
-            mode=mode,
-            seed=seed,
-            height=height,
-            width=width,
-            num_frames=num_frames,
-            frame_rate=frame_rate,
-            num_inference_steps=num_inference_steps,
-            enhance_prompt=enhance_prompt,
-        )
+        prompt = body.get("prompt", "")
+        seed = body.get("seed", 42)
+        num_frames = body.get("num_frames", 121)
+        frame_rate = body.get("frame_rate", 24.0)
+        enhance_prompt = body.get("enhance_prompt", False)
+        negative_prompt = body.get("negative_prompt", "")
+
+        image_bytes = None
+        if body.get("image_base64"):
+            image_bytes = base64.b64decode(body["image_base64"])
+
+        if self.mode in ("standard", "fast", "hq"):
+            result = self.generate.local(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                seed=seed,
+                height=body.get("height"),
+                width=body.get("width"),
+                num_frames=num_frames,
+                frame_rate=frame_rate,
+                num_inference_steps=body.get("num_inference_steps"),
+                cfg_scale=body.get("cfg_scale", 3.0),
+                stg_scale=body.get("stg_scale"),
+                rescale_scale=body.get("rescale_scale"),
+                image_bytes=image_bytes,
+                image_strength=body.get("image_strength", 1.0),
+                enhance_prompt=enhance_prompt,
+            )
+
+        elif self.mode == "a2vid":
+            audio_b64 = body.get("audio_base64")
+            if not audio_b64:
+                return {"error": "audio_base64 is required for a2vid mode"}
+            result = self.generate_from_audio.local(
+                prompt=prompt,
+                audio_bytes=base64.b64decode(audio_b64),
+                negative_prompt=negative_prompt,
+                seed=seed,
+                height=body.get("height", 1024),
+                width=body.get("width", 1536),
+                num_frames=num_frames,
+                frame_rate=frame_rate,
+                num_inference_steps=body.get("num_inference_steps", 30),
+                cfg_scale=body.get("cfg_scale", 3.0),
+                stg_scale=body.get("stg_scale", 1.0),
+                rescale_scale=body.get("rescale_scale", 0.7),
+                image_bytes=image_bytes,
+                image_strength=body.get("image_strength", 1.0),
+                audio_start_time=body.get("audio_start_time", 0.0),
+                audio_max_duration=body.get("audio_max_duration"),
+                enhance_prompt=enhance_prompt,
+            )
+
+        elif self.mode == "keyframe":
+            keyframes_raw = body.get("keyframes", [])
+            if not keyframes_raw:
+                return {"error": "keyframes list is required for keyframe mode"}
+            keyframe_images = [
+                (base64.b64decode(kf["image_base64"]), kf["frame_idx"], kf.get("strength", 1.0))
+                for kf in keyframes_raw
+            ]
+            result = self.interpolate.local(
+                prompt=prompt,
+                keyframe_images=keyframe_images,
+                negative_prompt=negative_prompt,
+                seed=seed,
+                height=body.get("height", 1024),
+                width=body.get("width", 1536),
+                num_frames=num_frames,
+                frame_rate=frame_rate,
+                num_inference_steps=body.get("num_inference_steps", 30),
+                cfg_scale=body.get("cfg_scale", 3.0),
+                stg_scale=body.get("stg_scale", 1.0),
+                rescale_scale=body.get("rescale_scale", 0.7),
+                enhance_prompt=enhance_prompt,
+            )
+
+        elif self.mode == "retake":
+            video_b64 = body.get("video_base64")
+            if not video_b64:
+                return {"error": "video_base64 is required for retake mode"}
+            if body.get("start_time") is None or body.get("end_time") is None:
+                return {"error": "start_time and end_time are required for retake mode"}
+            result = self.retake.local(
+                video_bytes=base64.b64decode(video_b64),
+                prompt=prompt,
+                start_time=body["start_time"],
+                end_time=body["end_time"],
+                seed=seed,
+                negative_prompt=negative_prompt,
+                num_inference_steps=body.get("num_inference_steps", 40),
+                cfg_scale=body.get("cfg_scale", 3.0),
+                stg_scale=body.get("stg_scale", 1.0),
+                rescale_scale=body.get("rescale_scale", 0.7),
+                regenerate_video=body.get("regenerate_video", True),
+                regenerate_audio=body.get("regenerate_audio", True),
+                enhance_prompt=enhance_prompt,
+            )
+        else:
+            return {"error": f"Unknown mode: {self.mode}"}
+
         return Response(
             content=result["video_bytes"],
             media_type="video/mp4",
             headers={
-                "Content-Disposition": f'attachment; filename="{result["filename"]}"'
+                "Content-Disposition": f'attachment; filename="{result["filename"]}"',
+                "X-Duration": str(result["duration"]),
+                "X-Size-MB": str(result["size_mb"]),
+                "X-Gen-Time": str(result.get("gen_time_s", "")),
             },
         )
 
@@ -813,6 +897,7 @@ class LTXVideo:
 def main(
     prompt: str = "A cinematic shot of a golden sunset over a calm ocean, with gentle waves reflecting warm light and seabirds gliding overhead",
     mode: str = "standard",
+    precision: str = "bf16",
     seed: int = 42,
     num_frames: int = 121,
     frame_rate: float = 24.0,
@@ -823,9 +908,9 @@ def main(
     image: str = "",
     enhance_prompt: bool = False,
 ):
-    """Generate video(s) from text using LTX-2.3 on H200."""
+    """Generate video(s) from text using LTX-2.3."""
     num_frames = _snap_frames(num_frames)
-    print(f"Mode: {mode} | {num_frames / frame_rate:.1f}s | seed={seed}")
+    print(f"Mode: {mode} | Precision: {precision} | {num_frames / frame_rate:.1f}s | seed={seed}")
 
     image_bytes = None
     if image:
@@ -833,11 +918,10 @@ def main(
             image_bytes = f.read()
         print(f"Image conditioning: {image}")
 
-    ltx = LTXVideo()
+    ltx = LTXVideo(mode=mode, precision=precision)
 
     kwargs = dict(
         prompt=prompt,
-        mode=mode,
         seed=seed,
         num_frames=num_frames,
         frame_rate=frame_rate,
