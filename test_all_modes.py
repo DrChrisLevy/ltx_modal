@@ -21,7 +21,7 @@ Tests:
 from generate_video import app, LTXVideo
 
 
-def _save(result, name, precision="fp8"):
+def _save(result, name, precision="bf16"):
     fname = f"test_{name}_{precision}.mp4"
     with open(fname, "wb") as f:
         f.write(result["video_bytes"])
@@ -114,7 +114,7 @@ def run_tests(test: int = 0, precision: str = "bf16"):
     print(f"\nAll {len(calls)} tests complete.")
 
 
-def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision="fp8"):
+def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision="bf16"):
     """Run a single test by number."""
     if test == 1:
         print("=== Test 1: standard mode, 121 frames ===")
