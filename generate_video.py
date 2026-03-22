@@ -78,6 +78,10 @@ def _snap_frames(n: int) -> int:
     scaledown_window=15 * 60,
 )
 class LTXVideo:
+    # TODO: Add method/mode guards — calling generate() on an a2vid container
+    #   would fail silently. Callers dispatch correctly today but should validate.
+    # TODO: Skip loading unused components per mode — audio_encoder loaded but
+    #   unused for standard/hq/keyframe; audio_decoder+vocoder unused for a2vid.
     mode: str = modal.parameter()
     precision: str = modal.parameter(default="bf16")
 
