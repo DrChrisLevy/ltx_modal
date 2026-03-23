@@ -11,11 +11,6 @@ Modes:
   a2vid    — audio-conditioned video generation (1024x1536)
   keyframe — interpolation between keyframe images (1024x1536)
   retake   — regenerate a time region of existing video
-
-Usage:
-    uv run modal run generate_video.py --mode standard --prompt "A cat on a windowsill"
-    uv run modal run generate_video.py --mode fast --prompt "..." --precision fp8
-    uv run modal run generate_video.py --mode a2vid --prompt "..." --audio audio.wav
 """
 
 import modal
@@ -168,9 +163,11 @@ class LTXVideo:
 
         if self.mode == "standard":
             from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
+
             self._pipeline = TI2VidTwoStagesPipeline(**two_stage)
         elif self.mode == "fast":
             from ltx_pipelines.distilled import DistilledPipeline
+
             self._pipeline = DistilledPipeline(
                 distilled_checkpoint_path=dist_ckpt,
                 spatial_upsampler_path=upscaler,
@@ -179,6 +176,7 @@ class LTXVideo:
             )
         elif self.mode == "hq":
             from ltx_pipelines.ti2vid_two_stages_hq import TI2VidTwoStagesHQPipeline
+
             self._pipeline = TI2VidTwoStagesHQPipeline(
                 checkpoint_path=dev_ckpt,
                 distilled_lora=dist_lora,
@@ -190,12 +188,17 @@ class LTXVideo:
             )
         elif self.mode == "a2vid":
             from ltx_pipelines.a2vid_two_stage import A2VidPipelineTwoStage
+
             self._pipeline = A2VidPipelineTwoStage(**two_stage)
         elif self.mode == "keyframe":
-            from ltx_pipelines.keyframe_interpolation import KeyframeInterpolationPipeline
+            from ltx_pipelines.keyframe_interpolation import (
+                KeyframeInterpolationPipeline,
+            )
+
             self._pipeline = KeyframeInterpolationPipeline(**two_stage)
         elif self.mode == "retake":
             from ltx_pipelines.retake import RetakePipeline
+
             self._pipeline = RetakePipeline(
                 checkpoint_path=dev_ckpt, loras=[], **shared
             )
@@ -208,9 +211,10 @@ class LTXVideo:
 
         Only loads what this mode needs — no wasted VRAM.
         """
-        import torch
 
-        def patch(ledger, *, text_enc, emb, venc, vdec, aenc, adec, voc, ups=None, xfmr=None):
+        def patch(
+            ledger, *, text_enc, emb, venc, vdec, aenc, adec, voc, ups=None, xfmr=None
+        ):
             """Replace a ModelLedger's factory methods with cached returns."""
             ledger.text_encoder = lambda te=text_enc: te
             ledger.gemma_embeddings_processor = lambda e=emb: e
@@ -239,8 +243,18 @@ class LTXVideo:
             voc = ledger.vocoder()
             print("Loading distilled transformer...")
             xfmr = ledger.transformer()
-            patch(ledger, text_enc=text_enc, emb=emb, venc=venc, vdec=vdec,
-                  aenc=aenc, adec=adec, voc=voc, ups=ups, xfmr=xfmr)
+            patch(
+                ledger,
+                text_enc=text_enc,
+                emb=emb,
+                venc=venc,
+                vdec=vdec,
+                aenc=aenc,
+                adec=adec,
+                voc=voc,
+                ups=ups,
+                xfmr=xfmr,
+            )
 
         elif self.mode == "retake":
             ledger = self._pipeline.model_ledger
@@ -255,8 +269,17 @@ class LTXVideo:
             voc = ledger.vocoder()
             print("Loading dev transformer...")
             xfmr = ledger.transformer()
-            patch(ledger, text_enc=text_enc, emb=emb, venc=venc, vdec=vdec,
-                  aenc=aenc, adec=adec, voc=voc, xfmr=xfmr)
+            patch(
+                ledger,
+                text_enc=text_enc,
+                emb=emb,
+                venc=venc,
+                vdec=vdec,
+                aenc=aenc,
+                adec=adec,
+                voc=voc,
+                xfmr=xfmr,
+            )
 
         else:
             # Two-stage pipelines: standard, hq, a2vid, keyframe
@@ -280,8 +303,16 @@ class LTXVideo:
             print("Loading stage 2 transformer...")
             s2_xfmr = s2_ledger.transformer()
 
-            kw = dict(text_enc=text_enc, emb=emb, venc=venc, vdec=vdec,
-                      aenc=aenc, adec=adec, voc=voc, ups=ups)
+            kw = dict(
+                text_enc=text_enc,
+                emb=emb,
+                venc=venc,
+                vdec=vdec,
+                aenc=aenc,
+                adec=adec,
+                voc=voc,
+                ups=ups,
+            )
             patch(s1_ledger, **kw, xfmr=s1_xfmr)
             patch(s2_ledger, **kw, xfmr=s2_xfmr)
 
@@ -327,6 +358,8 @@ class LTXVideo:
         self, video, audio, num_frames, frame_rate, prompt, seed, save_name=None
     ):
         """Encode video+audio to MP4, save to volume, return result dict."""
+        import tempfile
+
         import torch
         from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
         from ltx_pipelines.utils.media_io import encode_video
@@ -334,7 +367,7 @@ class LTXVideo:
         tiling = TilingConfig.default()
         chunks = get_video_chunks_number(num_frames, tiling)
 
-        path = "/tmp/output.mp4"
+        path = tempfile.mktemp(suffix=".mp4", dir="/tmp")
         with torch.no_grad():
             encode_video(
                 video=video,
@@ -502,18 +535,14 @@ class LTXVideo:
                     video_guider_params=self._video_guider(
                         cfg_scale, stg_scale, rescale_scale
                     ),
-                    audio_guider_params=self._audio_guider(
-                        stg_scale, rescale_scale
-                    ),
+                    audio_guider_params=self._audio_guider(stg_scale, rescale_scale),
                     images=images,
                     tiling_config=tiling,
                     enhance_prompt=enhance_prompt,
                 )
 
         gen_time = time.time() - t0
-        result = self._encode_result(
-            video, audio, num_frames, frame_rate, prompt, seed
-        )
+        result = self._encode_result(video, audio, num_frames, frame_rate, prompt, seed)
         result["mode"] = self.mode
         result["gen_time_s"] = round(gen_time, 1)
         print(
@@ -556,6 +585,7 @@ class LTXVideo:
         images = []
         if image_bytes is not None:
             from ltx_pipelines.utils.args import ImageConditioningInput
+
             img_path = self._write_temp(image_bytes, ".png")
             images = [ImageConditioningInput(img_path, 0, image_strength, 33)]
 
@@ -587,9 +617,7 @@ class LTXVideo:
             )
 
         gen_time = time.time() - t0
-        result = self._encode_result(
-            video, audio, num_frames, frame_rate, prompt, seed
-        )
+        result = self._encode_result(video, audio, num_frames, frame_rate, prompt, seed)
         result["mode"] = "a2vid"
         result["gen_time_s"] = round(gen_time, 1)
         print(f"  done in {gen_time:.0f}s | {result['filename']}")
@@ -649,9 +677,7 @@ class LTXVideo:
             )
 
         gen_time = time.time() - t0
-        result = self._encode_result(
-            video, audio, num_frames, frame_rate, prompt, seed
-        )
+        result = self._encode_result(video, audio, num_frames, frame_rate, prompt, seed)
         result["mode"] = "keyframe"
         result["gen_time_s"] = round(gen_time, 1)
         print(f"  done in {gen_time:.0f}s | {result['filename']}")
@@ -743,61 +769,3 @@ class LTXVideo:
                     entry["metadata"] = json.load(f)
             videos.append(entry)
         return videos
-
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
-@app.local_entrypoint()
-def main(
-    prompt: str = "A cinematic shot of a golden sunset over a calm ocean, with gentle waves reflecting warm light and seabirds gliding overhead",
-    mode: str = "standard",
-    precision: str = "bf16",
-    seed: int = 42,
-    num_frames: int = 121,
-    frame_rate: float = 24.0,
-    height: int = 0,
-    width: int = 0,
-    num_inference_steps: int = 0,
-    num_videos: int = 1,
-    image: str = "",
-    enhance_prompt: bool = False,
-):
-    """Generate video(s) from text using LTX-2.3."""
-    num_frames = _snap_frames(num_frames)
-    print(f"Mode: {mode} | Precision: {precision} | {num_frames / frame_rate:.1f}s | seed={seed}")
-
-    image_bytes = None
-    if image:
-        with open(image, "rb") as f:
-            image_bytes = f.read()
-        print(f"Image conditioning: {image}")
-
-    ltx = LTXVideo(mode=mode, precision=precision)
-
-    kwargs = dict(
-        prompt=prompt,
-        seed=seed,
-        num_frames=num_frames,
-        frame_rate=frame_rate,
-        image_bytes=image_bytes,
-        enhance_prompt=enhance_prompt,
-        height=height or None,
-        width=width or None,
-        num_inference_steps=num_inference_steps or None,
-    )
-
-    for i in range(num_videos):
-        kwargs["seed"] = seed + i
-        result = ltx.generate.remote(**kwargs)
-        fname = f"output_{i}.mp4" if num_videos > 1 else "output.mp4"
-        with open(fname, "wb") as f:
-            f.write(result["video_bytes"])
-        print(
-            f"Saved: {fname} ({result['duration']}s, {result['size_mb']} MB, "
-            f"{result['gen_time_s']}s gen)"
-        )
-    print("Done.")

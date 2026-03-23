@@ -18,7 +18,7 @@ Tests:
     8. retake (generate 10s base via fast, then retake 3-8s)
 """
 
-from generate_video import app, LTXVideo
+from generate_video import LTXVideo, app
 
 
 def _save(result, name, precision="bf16"):
@@ -47,8 +47,16 @@ def run_tests(test: int = 0, precision: str = "bf16"):
     retake = LTXVideo(mode="retake", precision=precision)
 
     if test > 0:
-        _run_single(test, standard=standard, fast=fast, hq=hq,
-                    a2vid=a2vid, keyframe=keyframe, retake=retake, precision=precision)
+        _run_single(
+            test,
+            standard=standard,
+            fast=fast,
+            hq=hq,
+            a2vid=a2vid,
+            keyframe=keyframe,
+            retake=retake,
+            precision=precision,
+        )
         return
 
     # Fire all tests in parallel — each goes to its mode's container pool
@@ -58,42 +66,53 @@ def run_tests(test: int = 0, precision: str = "bf16"):
 
     calls["1_standard_121f"] = standard.generate.spawn(
         prompt="A cinematic shot of a golden sunset over a calm ocean, gentle waves reflecting warm light, seabirds gliding overhead, the camera slowly pans right",
-        num_frames=121, seed=42,
+        num_frames=121,
+        seed=42,
     )
     calls["2_fast_121f"] = fast.generate.spawn(
         prompt="A massive dragon emerges from storm clouds, lightning crackling around its wings as it descends toward a medieval castle",
-        num_frames=121, seed=77,
+        num_frames=121,
+        seed=77,
     )
     calls["3_hq_49f"] = hq.generate.spawn(
         prompt="Macro shot of a dewdrop on a rose petal at sunrise, the droplet acts as a lens revealing an inverted garden, rack focus from the drop to the blurred background",
-        num_frames=49, seed=11,
+        num_frames=49,
+        seed=11,
     )
     calls["4_i2v_fast"] = fast.generate.spawn(
         prompt="A woman slowly turns her head toward the camera and smiles, soft natural lighting, her hair moves gently in a breeze, shallow depth of field",
-        num_frames=121, seed=42,
-        image_bytes=_load_file("test_image.jpeg"), image_strength=1.0,
+        num_frames=121,
+        seed=42,
+        image_bytes=_load_file("test_image.jpeg"),
+        image_strength=1.0,
     )
     calls["5_enhanced_49f"] = fast.generate.spawn(
         prompt="a dog playing in snow",
-        num_frames=49, seed=22, enhance_prompt=True,
+        num_frames=49,
+        seed=22,
+        enhance_prompt=True,
     )
     calls["6_a2v"] = a2vid.generate_from_audio.spawn(
         prompt="A guitarist shreds an electric guitar solo on stage, colorful stage lights flash and pulse, the crowd cheers, smoke fills the air, cinematic concert footage",
-        audio_bytes=_load_file("test_audio.wav"), num_frames=121, seed=42,
+        audio_bytes=_load_file("test_audio.wav"),
+        num_frames=121,
+        seed=42,
     )
 
     kf1, kf2 = _load_file("test_kf1.jpeg"), _load_file("test_kf2.jpeg")
     calls["7_keyframe"] = keyframe.interpolate.spawn(
         prompt="A smooth cinematic transition between two scenes, the camera glides through space, soft lighting shifts gradually",
         keyframe_images=[(kf1, 0, 1.0), (kf2, 120, 1.0)],
-        num_frames=121, seed=42,
+        num_frames=121,
+        seed=42,
     )
 
     # Test 8: retake needs base video first (sequential)
     print("Test 8: generating 10s base video for retake...")
     base = fast.generate.remote(
         prompt="A woman walks down a quiet city street at night, neon signs reflecting on wet pavement, calm atmosphere",
-        num_frames=241, seed=99,
+        num_frames=241,
+        seed=99,
     )
     _save(base, "8_retake_base", precision)
 
@@ -101,7 +120,9 @@ def run_tests(test: int = 0, precision: str = "bf16"):
     calls["8_retake_result"] = retake.retake.spawn(
         video_bytes=base["video_bytes"],
         prompt="A giant monster crashes through buildings on a city street at night, debris and dust flying everywhere, cars flipping, explosions, pure chaos and destruction",
-        start_time=3.0, end_time=8.0, seed=200,
+        start_time=3.0,
+        end_time=8.0,
+        seed=200,
     )
 
     # Collect all results
@@ -120,7 +141,8 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         print("=== Test 1: standard mode, 121 frames ===")
         r = standard.generate.remote(
             prompt="A cinematic shot of a golden sunset over a calm ocean, gentle waves reflecting warm light, seabirds gliding overhead, the camera slowly pans right",
-            num_frames=121, seed=42,
+            num_frames=121,
+            seed=42,
         )
         _save(r, "1_standard_121f", precision)
 
@@ -128,7 +150,8 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         print("=== Test 2: fast mode, 121 frames ===")
         r = fast.generate.remote(
             prompt="A massive dragon emerges from storm clouds, lightning crackling around its wings as it descends toward a medieval castle",
-            num_frames=121, seed=77,
+            num_frames=121,
+            seed=77,
         )
         _save(r, "2_fast_121f", precision)
 
@@ -136,7 +159,8 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         print("=== Test 3: hq mode, 49 frames, 1088x1920 ===")
         r = hq.generate.remote(
             prompt="Macro shot of a dewdrop on a rose petal at sunrise, the droplet acts as a lens revealing an inverted garden, rack focus from the drop to the blurred background",
-            num_frames=49, seed=11,
+            num_frames=49,
+            seed=11,
         )
         _save(r, "3_hq_49f", precision)
 
@@ -144,8 +168,10 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         print("=== Test 4: image-to-video (fast, 121 frames) ===")
         r = fast.generate.remote(
             prompt="A woman slowly turns her head toward the camera and smiles, soft natural lighting, her hair moves gently in a breeze, shallow depth of field",
-            num_frames=121, seed=42,
-            image_bytes=_load_file("test_image.jpeg"), image_strength=1.0,
+            num_frames=121,
+            seed=42,
+            image_bytes=_load_file("test_image.jpeg"),
+            image_strength=1.0,
         )
         _save(r, "4_i2v_fast", precision)
 
@@ -153,7 +179,9 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         print("=== Test 5: enhance_prompt (fast, 49 frames) ===")
         r = fast.generate.remote(
             prompt="a dog playing in snow",
-            num_frames=49, seed=22, enhance_prompt=True,
+            num_frames=49,
+            seed=22,
+            enhance_prompt=True,
         )
         _save(r, "5_enhanced_49f", precision)
 
@@ -161,7 +189,9 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         print("=== Test 6: audio-to-video (a2vid, 121 frames) ===")
         r = a2vid.generate_from_audio.remote(
             prompt="A guitarist shreds an electric guitar solo on stage, colorful stage lights flash and pulse, the crowd cheers, smoke fills the air, cinematic concert footage",
-            audio_bytes=_load_file("test_audio.wav"), num_frames=121, seed=42,
+            audio_bytes=_load_file("test_audio.wav"),
+            num_frames=121,
+            seed=42,
         )
         _save(r, "6_a2v", precision)
 
@@ -171,7 +201,8 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         r = keyframe.interpolate.remote(
             prompt="A smooth cinematic transition between two scenes, the camera glides through space, soft lighting shifts gradually",
             keyframe_images=[(kf1, 0, 1.0), (kf2, 120, 1.0)],
-            num_frames=121, seed=42,
+            num_frames=121,
+            seed=42,
         )
         _save(r, "7_keyframe", precision)
 
@@ -180,13 +211,16 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         print("  Generating 10s base video...")
         base = fast.generate.remote(
             prompt="A woman walks down a quiet city street at night, neon signs reflecting on wet pavement, calm atmosphere",
-            num_frames=241, seed=99,
+            num_frames=241,
+            seed=99,
         )
         _save(base, "8_retake_base", precision)
         print("  Retaking 3-8s region...")
         r = retake.retake.remote(
             video_bytes=base["video_bytes"],
             prompt="A giant monster crashes through buildings on a city street at night, debris and dust flying everywhere, cars flipping, explosions, pure chaos and destruction",
-            start_time=3.0, end_time=8.0, seed=200,
+            start_time=3.0,
+            end_time=8.0,
+            seed=200,
         )
         _save(r, "8_retake_result", precision)
