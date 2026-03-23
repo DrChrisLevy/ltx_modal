@@ -4,24 +4,22 @@ Generate videos from text, images, and audio using the Lightricks LTX-2.3 model 
 
 ## Quick Start
 
-```bash
+```python
+from generate_video import LTXVideo
+
 # Text-to-video (5 seconds, standard mode, BF16)
-uv run modal run generate_video.py --mode standard --prompt "A cat sitting on a windowsill watching rain"
+ltx = LTXVideo(mode="standard")
+result = ltx.generate.remote(prompt="A cat sitting on a windowsill watching rain")
+with open("output.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 
 # Fast mode (~4x faster)
-uv run modal run generate_video.py --mode fast --prompt "..."
-
-# HQ mode (1080p, res_2s sampler)
-uv run modal run generate_video.py --mode hq --prompt "..."
-
-# Longer video (10 seconds)
-uv run modal run generate_video.py --mode fast --prompt "..." --num-frames 241
-
-# Image-to-video (animate a photo)
-uv run modal run generate_video.py --mode standard --prompt "She turns and smiles" --image photo.jpg
+fast = LTXVideo(mode="fast")
+result = fast.generate.remote(prompt="...")
 
 # FP8 precision (lower quality, uses less VRAM)
-uv run modal run generate_video.py --mode standard --prompt "..." --precision fp8
+ltx = LTXVideo(mode="standard", precision="fp8")
+result = ltx.generate.remote(prompt="...")
 ```
 
 ## Architecture
@@ -91,23 +89,6 @@ Regenerate a specific time region of an existing video.
 - **Resolution**: matches source video
 - **Gen time**: ~1490s for 10s video (BF16) — slow by design
 - **Requires**: Source video + time range
-
-## CLI Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--prompt` | *(required)* | Text description of the desired video |
-| `--mode` | `standard` | Mode: `standard`, `fast`, `hq` |
-| `--precision` | `bf16` | Precision: `bf16` or `fp8` |
-| `--seed` | `42` | Random seed for reproducibility |
-| `--num-frames` | `121` | Number of frames (see duration table) |
-| `--frame-rate` | `24.0` | Playback FPS |
-| `--height` | auto | Output height (divisible by 64) |
-| `--width` | auto | Output width (divisible by 64) |
-| `--num-inference-steps` | auto | Denoising steps (auto per mode) |
-| `--num-videos` | `1` | Generate multiple videos (increments seed) |
-| `--image` | | Path to conditioning image |
-| `--enhance-prompt` | `false` | Let Gemma 3 expand your prompt |
 
 ## Precision
 
@@ -256,14 +237,6 @@ result = retake.retake.remote(
     regenerate_video=True,
     regenerate_audio=True,
 )
-```
-
-### Custom Precision
-
-```python
-# FP8 for lower VRAM usage
-ltx = LTXVideo(mode="fast", precision="fp8")
-result = ltx.generate.remote(prompt="...", seed=42)
 ```
 
 ## Guidance Parameters (Advanced)
