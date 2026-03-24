@@ -2,7 +2,7 @@
 
 Run [Lightricks LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B parameters) on Modal H200 GPUs. All 6 generation modes — text-to-video, image-to-video, HQ, audio-to-video, keyframe interpolation, and temporal retake.
 
-Uses the official Lightricks inference code directly — not a reimplementation. The default code in the ltx repo loads and unloads models from disk between stages (designed for consumer GPUs). Here, all models — text encoder, transformers, VAEs, vocoder, upsampler — are loaded into H200 VRAM once at container startup and patched into the pipeline's `ModelLedger` so they stay resident. Two-stage modes keep both transformers (~88 GB) in memory simultaneously. Zero disk I/O between stages, no GC pauses — diffusion starts immediately on every request.
+LTX-2.3 is a joint video+audio model — every mode generates synchronized audio alongside the video.
 
 ## Setup
 
@@ -23,7 +23,7 @@ Deploy:
 uv run modal deploy generate_video.py
 ```
 
-Models download automatically on first request and are cached on a Modal volume.
+Models download automatically on first request and are cached on a Modal volume. After container startup, containers stay warm for 15 minutes if idle. VRAM usage depends on the mode. Two-stage modes (standard, hq, a2vid, keyframe) keep two full transformers plus shared models in VRAM (~100+ GB). Single-stage modes (fast, retake) keep one transformer (~50–60 GB).
 
 ## Generate a video
 
@@ -45,14 +45,30 @@ Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
 
 ## Modes
 
-| Mode | Description |
-|------|-------------|
-| **standard** | Best quality text/image-to-video |
-| **fast** | ~4x faster, distilled model |
-| **hq** | 1080p with second-order sampler |
-| **a2vid** | Audio-conditioned video generation |
-| **keyframe** | Interpolation between keyframe images |
-| **retake** | Edit a time region of existing video |
+| Mode | Resolution | Steps | Description |
+|------|-----------|-------|-------------|
+| **standard** | 1024x1536 | 30 | Best quality text/image-to-video (two-stage with 2x upscale) |
+| **fast** | 1024x1536 | 8+4 | ~4x faster, distilled model (two-stage) |
+| **hq** | 1088x1920 | 15 | 1080p with second-order sampler (two-stage) |
+| **a2vid** | 1024x1536 | 30 | Audio-conditioned video generation (two-stage) |
+| **keyframe** | 1024x1536 | 30 | Interpolation between keyframe images (two-stage) |
+| **retake** | (from input) | 40 | Regenerate a time region of existing video (single-stage, no upscale) |
+
+All resolutions and step counts are defaults — you can override them via parameters.
+
+### Precision
+
+Pass `precision="fp8"` to quantize the transformer weights (FP8 cast). Lower VRAM usage, slightly lower quality. Works with any mode.
+
+```python
+ltx = LTXVideo(mode="standard", precision="fp8")
+```
+
+## Constraints
+
+- **Frame count** must satisfy `(frames - 1) % 8 == 0` — i.e. 9, 17, 25, …, 97, 121, 193, etc. Invalid counts are automatically rounded up. Duration = `num_frames / frame_rate` — the default 121 frames at 24 fps is ~5 seconds.
+- **Resolution** must be divisible by 64 (height and width).
+- **Retake input video** must already satisfy `8k+1` frame count and resolution divisible by 32. The output keeps the source video's resolution and frame rate.
 
 ## Examples
 
@@ -74,9 +90,7 @@ with open("animated_image.mp4", "wb") as f:
 ```python
 ltx = LTXVideo(mode="a2vid")
 result = ltx.generate_from_audio.remote(
-prompt="A guitarist shreds a solo on stage",
-    audio_bytes=open("test_audio.wav", "rb").read(),
-)
+prompt="A guitarist shreds a solo on stage", audio_bytes=open("test_audio.wav", "rb").read())
 with open("audio_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
@@ -94,6 +108,39 @@ result = ltx.interpolate.remote(
     num_frames=121,
 )
 with open("interpolated_video.mp4", "wb") as f:
+    f.write(result["video_bytes"])
+```
+
+### Using optional parameters
+
+```python
+ltx = LTXVideo(mode="standard")
+result = ltx.generate.remote(
+    prompt="A calm forest stream at sunrise, light filtering through the canopy",
+    negative_prompt="blurry, low quality, distorted",
+    seed=123,
+    num_frames=193,          # ~8 seconds at 24fps (must be 8k+1)
+    height=1024,
+    width=1536,
+    enhance_prompt=True,     # let the model expand your prompt
+)
+```
+
+### Comparing Standard vs Fast vs HQ vs FP8
+
+```python
+prompt = "INT. SUNLIT APARTMENT – LATE AFTERNOON fluffy tabby cat sits curled on a windowsill, warm golden light washing across its fur, soft shadows pooling beneath it. The camera holds a gentle static medium shot, barely breathing with the faintest slow push-in toward the cat's face. The cat blinks slowly, shifts its weight, and turns its head slightly toward the glass. A curtain beside it sways once in a lazy draft, then stills. Outside, leaves flutter and birds chirp softly in the distance."
+
+for mode, filename in [("standard", "cat_standard"), ("hq", "cat_hq"), ("fast", "cat_fast")]:
+    ltx = LTXVideo(mode=mode)
+    result = ltx.generate.remote(prompt=prompt)
+    with open(f"{filename}.mp4", "wb") as f:
+        f.write(result["video_bytes"])
+
+# Same thing but with FP8 quantization
+ltx = LTXVideo(mode="standard", precision="fp8")
+result = ltx.generate.remote(prompt=prompt)
+with open("cat_standard_fp8.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
@@ -116,160 +163,59 @@ with open("retake_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-### Comparing Standard vs Fast VS HQ VS FP8
+## Parameters
+
+### `generate()` (standard, fast, hq)
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `prompt` | required | Text description of the video |
+| `negative_prompt` | `""` | What to avoid (ignored in fast mode) |
+| `seed` | `42` | For reproducibility |
+| `num_frames` | `121` | Auto-snapped to `8k+1`. 121 = ~5s at 24fps |
+| `frame_rate` | `24.0` | |
+| `height` / `width` | mode default | Must be divisible by 64 |
+| `num_inference_steps` | mode default | 30 (standard), 15 (hq). Fast uses fixed schedule |
+| `cfg_scale` | `3.0` | Classifier-free guidance strength |
+| `stg_scale` | mode default | 1.0 (standard/fast), 0.0 (hq) |
+| `rescale_scale` | mode default | 0.7 (standard/fast), 0.45 (hq) |
+| `image_bytes` | `None` | Image bytes for image-to-video |
+| `image_strength` | `1.0` | How strongly the image conditions the output |
+| `enhance_prompt` | `False` | Let the model expand your prompt |
+
+### `generate_from_audio()` (a2vid)
+
+Same as `generate()` plus:
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `audio_bytes` | required | WAV audio bytes |
+| `audio_start_time` | `0.0` | Start offset in the audio file |
+| `audio_max_duration` | `None` | Max audio duration to use |
+
+### `retake()` (retake)
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `video_bytes` | required | Source video bytes |
+| `prompt` | required | Describes the regenerated section |
+| `start_time` / `end_time` | required | Time window in seconds to regenerate |
+| `regenerate_video` | `True` | Set `False` to only regenerate audio |
+| `regenerate_audio` | `True` | Set `False` to only regenerate video |
+| `num_inference_steps` | `40` | |
+
+### `interpolate()` (keyframe)
+
+Same as `generate()`, but takes `keyframe_images` instead of `image_bytes`:
 
 ```python
-prompt="INT. SUNLIT APARTMENT – LATE AFTERNOON fluffy tabby cat sits curled on a windowsill, warm golden light washing across its fur, soft shadows pooling beneath it. The camera holds a gentle static medium shot, barely breathing with the faintest slow push-in toward the cat's face. The cat blinks slowly, shifts its weight, and turns its head slightly toward the glass. A curtain beside it sways once in a lazy draft, then stills. Outside, leaves flutter and birds chirp softly in the distance."
-ltx = LTXVideo(mode="standard")
-result = ltx.generate.remote(prompt=prompt)
-with open("cat_standard.mp4", "wb") as f:
-    f.write(result["video_bytes"])
-
-ltx = LTXVideo(mode="hq")
-result = ltx.generate.remote(prompt=prompt)
-with open("cat_hq.mp4", "wb") as f:
-    f.write(result["video_bytes"])
-
-ltx = LTXVideo(mode="fast")
-result = ltx.generate.remote(prompt=prompt)
-with open("cat_fast.mp4", "wb") as f:
-    f.write(result["video_bytes"])
-
-ltx = LTXVideo(mode="standard", precision="fp8")
-result = ltx.generate.remote(prompt=prompt)
-with open("cat_standard_fp8.mp4", "wb") as f:
-    f.write(result["video_bytes"])
+keyframe_images=[(img_bytes, frame_index, strength), ...]
 ```
 
 ---
 
-## Reference
-
-### Duration
-
-`num_frames / frame_rate`. Frames auto-snap to 8k+1 format.
-
-| Frames | Duration @24fps |
-|--------|-----------------|
-| 49 | 2s |
-| 97 | 4s |
-| **121** | **5s (default)** |
-| 241 | 10s |
-| 481 | 20s |
-
-### Resolution
-
-Must be divisible by 64. Defaults: 1024x1536 (standard/fast), 1088x1920 (hq).
-
-### Precision
-
-| | Quality | VRAM | Notes |
-|-|---------|------|-------|
-| **bf16** | Full | ~44 GB | Default, recommended on H200 |
-| **fp8** | Slight loss | ~22 GB | Only if VRAM-constrained |
-
-### Guidance (standard/hq only, ignored by fast)
-
-| Parameter | Standard | HQ | Range |
-|-----------|----------|-----|-------|
-| `cfg_scale` | 3.0 | 3.0 | 1.0-5.0 |
-| `stg_scale` | 1.0 | 0.0 | 0.0-1.5 |
-| `rescale_scale` | 0.7 | 0.45 | 0.0-1.0 |
-
-### `generate()` parameters
-
-| Parameter | Default | |
-|-----------|---------|---|
-| `prompt` | *required* | Text description |
-| `negative_prompt` | `""` | What to avoid |
-| `seed` | `42` | Random seed |
-| `height` / `width` | auto | Divisible by 64 |
-| `num_frames` | `121` | Auto-snapped to 8k+1 |
-| `frame_rate` | `24.0` | Playback FPS |
-| `num_inference_steps` | auto | Denoising steps |
-| `cfg_scale` | `3.0` | Classifier-free guidance |
-| `stg_scale` | auto | Spatio-temporal guidance |
-| `rescale_scale` | auto | Prevents over-saturation |
-| `image_bytes` | `None` | Image bytes for I2V |
-| `image_strength` | `1.0` | Conditioning strength |
-| `enhance_prompt` | `False` | Gemma prompt expansion |
-
-### `generate_from_audio()` adds
-
-| Parameter | Default | |
-|-----------|---------|---|
-| `audio_bytes` | *required* | Stereo WAV bytes |
-| `audio_start_time` | `0.0` | Offset into audio |
-| `audio_max_duration` | `None` | Max duration to use |
-
-### `interpolate()` replaces `image_bytes` with
-
-| Parameter | Default | |
-|-----------|---------|---|
-| `keyframe_images` | *required* | List of `(bytes, frame_idx, strength)` |
-
-### `retake()` parameters
-
-| Parameter | Default | |
-|-----------|---------|---|
-| `video_bytes` | *required* | Source video |
-| `prompt` | *required* | Description for edited region |
-| `start_time` / `end_time` | *required* | Region bounds (seconds) |
-| `regenerate_video` | `True` | Regenerate video track |
-| `regenerate_audio` | `True` | Regenerate audio track |
-
-Plus `seed`, `negative_prompt`, `num_inference_steps` (40), `cfg_scale`, `stg_scale`, `rescale_scale`, `enhance_prompt`.
-
----
-
-## Volumes
-
-| Volume | Path | Purpose |
-|--------|------|---------|
-| `ltx-models` | `/models` | Cached model weights (auto-downloaded) |
-| `ltx-outputs` | `/outputs` | Generated videos + JSON metadata |
-
-```bash
-modal volume ls ltx-outputs
-modal volume get ltx-outputs 20260323_sunset_s42.mp4 ./local.mp4
-```
-
-## Architecture
-
-Each `(mode, precision)` pair gets its own container pool. Models are loaded into VRAM once at startup — diffusion starts immediately on every request.
-
-```
-LTXVideo(mode, precision) → container pool → H200 GPU
-                                             ├── Gemma 3 12B text encoder
-                                             ├── Transformer (dev or distilled)
-                                             ├── Video VAE encoder + decoder
-                                             ├── Audio VAE + Vocoder
-                                             └── Spatial upsampler (2x)
-```
-
-Containers scale to zero after 15 min idle. Cost: ~$0.02 per 5s fast video (H200 at $4.54/hr, billed per second).
-
-### Why persistent models?
+## Why persistent models?
 
 The default Lightricks pipelines delete and reload the transformer from disk between stages — designed for consumer GPUs where VRAM is tight. On an H200 with 141 GB, there's no reason to unload.
 
-This project patches the `ModelLedger` at startup so all models stay GPU-resident. The pipeline's `del transformer; cleanup_memory()` calls still run but only drop a local reference — the patched lambda keeps the model alive. Zero disk I/O between stages.
-
-## Prompting
-
-Write a **single paragraph in present tense**, 4-8 sentences. Think like a cinematographer.
-
-> A woman in a red dress walks along a rain-soaked city street at night. Neon signs in blues and pinks reflect off the wet pavement. She pauses to look up at a flickering sign, her face illuminated by its glow. The camera tracks alongside her at eye level, slowly pushing in as she turns toward the lens. Shallow depth of field blurs the background traffic into soft bokeh.
-
-Not this: *"Beautiful woman walking in city, cinematic, 4K, highly detailed"*
-
-Tips: explicit camera instructions ("slow dolly in"), atmospheric elements (fog, rain, golden hour), physical emotion cues instead of labels. Characters can talk and sing.
-
-## Tests
-
-```bash
-uv run modal run test_all_modes.py::run_tests        # all 8 in parallel
-uv run modal run test_all_modes.py::run_tests --test 2  # single test
-```
-
-Requires: `test_image.jpeg`, `test_audio.wav`, `test_kf1.jpeg`, `test_kf2.jpeg` in the project directory.
+This project patches the `ModelLedger` at startup so all models stay GPU-resident. The pipeline's `del transformer; cleanup_memory()` calls still run but only drop a local reference — the patched lambda keeps the model alive. Zero disk I/O between stages. This improves the latency.
