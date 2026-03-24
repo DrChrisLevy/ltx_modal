@@ -4,22 +4,20 @@ Generate videos from text, images, and audio using the Lightricks LTX-2.3 model 
 
 ## Quick Start
 
-```python
-from generate_video import LTXVideo
+```bash
+# Deploy once — the app stays running, containers scale to zero when idle
+uv run modal deploy generate_video.py
+```
 
-# Text-to-video (5 seconds, standard mode, BF16)
-ltx = LTXVideo(mode="standard")
+```python
+# Then call from any Python script
+import modal
+
+LTXVideo = modal.Cls.from_name("ltx-video", "LTXVideo")
+ltx = LTXVideo(mode="fast")
 result = ltx.generate.remote(prompt="A cat sitting on a windowsill watching rain")
 with open("output.mp4", "wb") as f:
     f.write(result["video_bytes"])
-
-# Fast mode (~4x faster)
-fast = LTXVideo(mode="fast")
-result = fast.generate.remote(prompt="...")
-
-# FP8 precision (lower quality, uses less VRAM)
-ltx = LTXVideo(mode="standard", precision="fp8")
-result = ltx.generate.remote(prompt="...")
 ```
 
 ## Architecture
@@ -165,11 +163,23 @@ Write prompts as a **single flowing paragraph** in **present tense**, 4-8 senten
 
 ## Python API
 
+Deploy the app first, then call from any Python script:
+
+```bash
+uv run modal deploy generate_video.py
+```
+
+Look up the deployed class with `modal.Cls.from_name`:
+
+```python
+import modal
+
+LTXVideo = modal.Cls.from_name("ltx-video", "LTXVideo")
+```
+
 ### Text/Image-to-Video
 
 ```python
-from generate_video import LTXVideo
-
 ltx = LTXVideo(mode="standard")  # or "fast", "hq"
 result = ltx.generate.remote(
     prompt="A timelapse of a flower blooming in morning light",
@@ -198,6 +208,8 @@ result = ltx.generate_from_audio.remote(
     audio_max_duration=None,
     image_bytes=None,  # optional first-frame conditioning
 )
+with open("output.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 ```
 
 ### Keyframe Interpolation
@@ -213,6 +225,8 @@ result = ltx.interpolate.remote(
     num_frames=121,
     seed=42,
 )
+with open("output.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 ```
 
 ### Retake (Video Editing)
@@ -227,8 +241,8 @@ base = fast.generate.remote(
 )
 
 # Retake a section
-retake = LTXVideo(mode="retake")
-result = retake.retake.remote(
+retake_handle = LTXVideo(mode="retake")
+result = retake_handle.retake.remote(
     video_bytes=base["video_bytes"],
     prompt="A monster crashes through buildings",
     start_time=3.0,
@@ -237,6 +251,16 @@ result = retake.retake.remote(
     regenerate_video=True,
     regenerate_audio=True,
 )
+with open("output.mp4", "wb") as f:
+    f.write(result["video_bytes"])
+```
+
+### Using `modal run` (for tests)
+
+If you want to run code without deploying, write a `@app.local_entrypoint()` in a separate script that imports `app` and `LTXVideo` from `generate_video`. See `test_all_modes.py` for examples.
+
+```bash
+uv run modal run test_all_modes.py::run_tests
 ```
 
 ## Guidance Parameters (Advanced)

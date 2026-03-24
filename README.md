@@ -8,13 +8,16 @@ Supports all 6 generation modes: text-to-video, image-to-video, HQ 1080p, audio-
 
 ```bash
 uv add modal
-uv run modal setup   # one-time auth
+uv run modal setup          # one-time auth
+uv run modal deploy generate_video.py   # deploy the app
 ```
 
 ## Usage
 
 ```python
-from generate_video import LTXVideo
+import modal
+
+LTXVideo = modal.Cls.from_name("ltx-video", "LTXVideo")
 
 # Text-to-video (5 seconds, best quality)
 ltx = LTXVideo(mode="standard")
@@ -107,6 +110,7 @@ Result: zero disk I/O between stages, no GC pauses, no model reconstruction. Dif
 
 ```python
 ltx = LTXVideo(mode="fast", precision="fp8")
+result = ltx.generate.remote(prompt="...", seed=42)
 ```
 
 ## Tests
