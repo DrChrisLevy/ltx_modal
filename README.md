@@ -7,8 +7,8 @@ Supports all 6 generation modes: text-to-video, image-to-video, HQ 1080p, audio-
 ## Setup
 
 ```bash
-pip install modal
-modal setup          # one-time auth
+uv add modal
+uv run modal setup   # one-time auth
 ```
 
 ## Usage
@@ -113,10 +113,10 @@ ltx = LTXVideo(mode="fast", precision="fp8")
 
 ```bash
 # All 8 tests in parallel (standard, fast, hq, i2v, enhance, a2vid, keyframe, retake)
-modal run test_all_modes.py::run_tests
+uv run modal run test_all_modes.py::run_tests
 
 # Single test
-modal run test_all_modes.py::run_tests --test 2
+uv run modal run test_all_modes.py::run_tests --test 2
 ```
 
 Tests require assets in the project directory: `test_image.jpeg`, `test_audio.wav`, `test_kf1.jpeg`, `test_kf2.jpeg`.
