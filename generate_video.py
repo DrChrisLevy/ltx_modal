@@ -380,10 +380,15 @@ class LTXVideo:
         with open(path, "rb") as f:
             video_bytes = f.read()
 
-        metadata = self._save(
+        filename = self._save(
             video_bytes, prompt, seed, num_frames / frame_rate, save_name
         )
-        return {"video_bytes": video_bytes, **metadata}
+        return {
+            "video_bytes": video_bytes,
+            "filename": filename,
+            "duration": round(num_frames / frame_rate, 2),
+            "size_mb": round(len(video_bytes) / 1024 / 1024, 2),
+        }
 
     def _save(self, video_bytes, prompt, seed, duration, name=None):
         import json
@@ -403,25 +408,26 @@ class LTXVideo:
             )
             fn = f"{ts}_{safe}_s{seed}.mp4"
 
-        metadata = {
-            "filename": fn,
-            "prompt": prompt,
-            "seed": seed,
-            "duration": round(duration, 2),
-            "size_mb": round(len(video_bytes) / 1024 / 1024, 2),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "mode": self.mode,
-            "precision": self.precision,
-        }
-
         with open(f"{OUTPUT_DIR}/{fn}", "wb") as f:
             f.write(video_bytes)
 
         with open(f"{OUTPUT_DIR}/{fn}.json", "w") as f:
-            json.dump(metadata, f, indent=2)
+            json.dump(
+                {
+                    "prompt": prompt,
+                    "seed": seed,
+                    "duration": round(duration, 2),
+                    "size_mb": round(len(video_bytes) / 1024 / 1024, 2),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "mode": self.mode,
+                    "precision": self.precision,
+                },
+                f,
+                indent=2,
+            )
 
         output_volume.commit()
-        return metadata
+        return fn
 
     def _video_guider(self, cfg_scale, stg_scale, rescale_scale):
         from ltx_core.components.guiders import MultiModalGuiderParams
@@ -537,6 +543,7 @@ class LTXVideo:
 
         gen_time = time.time() - t0
         result = self._encode_result(video, audio, num_frames, frame_rate, prompt, seed)
+        result["mode"] = self.mode
         result["gen_time_s"] = round(gen_time, 1)
         print(
             f"  done in {gen_time:.0f}s | {result['size_mb']} MB | {result['filename']}"
@@ -611,6 +618,7 @@ class LTXVideo:
 
         gen_time = time.time() - t0
         result = self._encode_result(video, audio, num_frames, frame_rate, prompt, seed)
+        result["mode"] = "a2vid"
         result["gen_time_s"] = round(gen_time, 1)
         print(f"  done in {gen_time:.0f}s | {result['filename']}")
         return result
@@ -670,6 +678,7 @@ class LTXVideo:
 
         gen_time = time.time() - t0
         result = self._encode_result(video, audio, num_frames, frame_rate, prompt, seed)
+        result["mode"] = "keyframe"
         result["gen_time_s"] = round(gen_time, 1)
         print(f"  done in {gen_time:.0f}s | {result['filename']}")
         return result
@@ -733,6 +742,7 @@ class LTXVideo:
         result = self._encode_result(
             video, audio_tensor, num_frames, frame_rate, prompt, seed
         )
+        result["mode"] = "retake"
         result["gen_time_s"] = round(gen_time, 1)
         print(f"  done in {gen_time:.0f}s | {result['filename']}")
         return result
