@@ -32,10 +32,12 @@ import modal
 
 LTXVideo = modal.Cls.from_name("ltx-video", "LTXVideo")
 
-ltx = LTXVideo(mode="standard")
-result = ltx.generate.remote(prompt="Mickey Mouse and Minnie Mouse dancing in the rain")
+prompt = """A sleek black sports car races out of a tunnel into blinding golden hour light, The camera view is from the inside of the car, looking out the windshield."""
 
-with open("output.mp4", "wb") as f:
+ltx = LTXVideo(mode="standard")
+result = ltx.generate.remote(prompt=prompt)
+
+with open("car_race.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
@@ -59,10 +61,12 @@ Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
 ```python
 ltx = LTXVideo(mode="standard")
 result = ltx.generate.remote(
-    prompt="She turns toward the camera and smiles, soft natural light",
-    image_bytes=open("photo.jpg", "rb").read(),
+    prompt="A young male anime-style pilot in his late teens, black hair with a white streak, wearing an orange flight suit covered in mission patches, grips dual joysticks with fierce intensity. The camera stays focused on hit face as he is surrounded by glowing green holographic displays and flashing red alert lights.",
+    image_bytes=open("test_image.jpeg", "rb").read(),
     seed=42,
 )
+with open("animated_image.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 ```
 
 ### Audio-to-video
@@ -70,9 +74,11 @@ result = ltx.generate.remote(
 ```python
 ltx = LTXVideo(mode="a2vid")
 result = ltx.generate_from_audio.remote(
-    prompt="A guitarist shreds a solo on stage, colorful lights flash",
-    audio_bytes=open("music.wav", "rb").read(),
+prompt="A guitarist shreds a solo on stage",
+    audio_bytes=open("test_audio.wav", "rb").read(),
 )
+with open("audio_video.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 ```
 
 ### Keyframe interpolation
@@ -80,30 +86,32 @@ result = ltx.generate_from_audio.remote(
 ```python
 ltx = LTXVideo(mode="keyframe")
 result = ltx.interpolate.remote(
-    prompt="A smooth cinematic transition from day to night",
+    prompt="An astronaut in a white spacesuit walks steadily forward across a rocky alien ridge at dawn. The camera is static, wide cinematic shot from behind. He steps off the jagged rock edge and strides forward into the vast orange desert, growing slightly smaller in frame. His arms swing naturally mid-walk. The dawn sky gradually brightens — the orange horizon glow expands upward into lavender. Two moons hang motionless in the indigo sky. Dust drifts faintly around his boots. Smooth, slow, cinematic movement. Photorealistic.",
     keyframe_images=[
-        (open("sunrise.jpg", "rb").read(), 0, 1.0),
-        (open("sunset.jpg", "rb").read(), 120, 1.0),
+        (open("img1.jpeg", "rb").read(), 0, 1.0),
+        (open("img2.jpeg", "rb").read(), 120, 1.0),
     ],
     num_frames=121,
 )
+with open("interpolated_video.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 ```
 
 ### Retake (edit a time region)
 
 ```python
-fast = LTXVideo(mode="fast")
-base = fast.generate.remote(
-    prompt="A woman walks down a city street at night",
-    num_frames=241,
+standard = LTXVideo(mode="standard")
+base = standard.generate.remote(
+    prompt="A woman walks down a quiet city street at night, neon signs reflecting on wet pavement",
+    num_frames=121,
 )
 
 retake = LTXVideo(mode="retake")
 result = retake.retake.remote(
     video_bytes=base["video_bytes"],
-    prompt="A monster crashes through buildings, debris everywhere",
-    start_time=3.0,
-    end_time=8.0,
+    prompt="A monster crashes through buildings, debris and dust flying everywhere, explosions",
+    start_time=1.0,
+    end_time=4.0,
 )
 ```
 
