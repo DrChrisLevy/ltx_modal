@@ -2,7 +2,7 @@
 
 Run [Lightricks LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B parameters) on Modal H200 GPUs. All 6 generation modes — text-to-video, image-to-video, HQ, audio-to-video, keyframe interpolation, and temporal retake.
 
-Uses the official Lightricks inference code directly — not a reimplementation. The key difference from running the source pipelines yourself: the default code loads and unloads the transformer from disk between stages (designed for consumer GPUs). Here, all models are loaded into H200 VRAM once at container startup and patched into the pipeline's `ModelLedger` so they stay resident. Two-stage modes keep both transformers (~88 GB) in memory simultaneously. Zero disk I/O between stages, no GC pauses — diffusion starts immediately on every request.
+Uses the official Lightricks inference code directly — not a reimplementation. The default code in the ltx repo loads and unloads models from disk between stages (designed for consumer GPUs). Here, all models — text encoder, transformers, VAEs, vocoder, upsampler — are loaded into H200 VRAM once at container startup and patched into the pipeline's `ModelLedger` so they stay resident. Two-stage modes keep both transformers (~88 GB) in memory simultaneously. Zero disk I/O between stages, no GC pauses — diffusion starts immediately on every request.
 
 ## Setup
 
