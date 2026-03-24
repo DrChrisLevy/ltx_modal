@@ -12,11 +12,6 @@ wheels/
 # Generated videos
 *.mp4
 
-# Test assets (not tracked — download for local testing)
-test_*.jpeg
-test_*.wav
-*.wav
-
 # Secrets
 .env
 

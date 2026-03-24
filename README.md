@@ -78,7 +78,7 @@ ltx = LTXVideo(mode="standard", precision="fp8")
 ltx = LTXVideo(mode="standard")
 result = ltx.generate.remote(
 prompt="INT. SPACECRAFT COCKPIT – anime cel-shaded style. A teenage male pilot in an orange mission flight suit grips a joystick, cockpit HUD screens glowing green, red warning lights pulsing on the walls. The camera holds nearly static on the existing framing, with a very subtle slow push-in toward the pilot's face. His eyes shift slightly, jaw tightens, and his grip hand micro-adjusts on the joystick. The red emergency lights continue their slow rhythmic pulse. A low cockpit alarm hums faintly in the background.",
-image_bytes=open("test_image.jpeg", "rb").read(),
+image_bytes=open("static/test_image.jpeg", "rb").read(),
 seed=42,
 )
 with open("animated_image.mp4", "wb") as f:
@@ -90,7 +90,7 @@ with open("animated_image.mp4", "wb") as f:
 ```python
 ltx = LTXVideo(mode="a2vid")
 result = ltx.generate_from_audio.remote(
-prompt="A guitarist shreds a solo on stage", audio_bytes=open("test_audio.wav", "rb").read())
+prompt="A guitarist shreds a solo on stage", audio_bytes=open("static/test_audio.wav", "rb").read())
 with open("audio_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
@@ -102,8 +102,8 @@ ltx = LTXVideo(mode="keyframe")
 result = ltx.interpolate.remote(
 prompt="An astronaut in a white spacesuit walks steadily forward across a rocky alien ridge at dawn. The camera is static, wide cinematic shot from behind. He steps off the jagged rock edge and strides forward into the vast orange desert, growing slightly smaller in frame. His arms swing naturally mid-walk. The dawn sky gradually brightens — the orange horizon glow expands upward into lavender. Two moons hang motionless in the indigo sky. Dust drifts faintly around his boots. Smooth, slow, cinematic movement. Photorealistic.",
 keyframe_images=[
-        (open("img1.jpeg", "rb").read(), 0, 1.0),
-        (open("img2.jpeg", "rb").read(), 120, 1.0),
+        (open("static/img1.jpeg", "rb").read(), 0, 1.0),
+        (open("static/img2.jpeg", "rb").read(), 120, 1.0),
     ],
     num_frames=121,
 )
