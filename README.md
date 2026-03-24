@@ -1,6 +1,6 @@
 # LTX-2.3 on Modal
 
-Run [Lightricks LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B parameters) on Modal H200 GPUs. All 6 generation modes — text-to-video, image-to-video, HQ, audio-to-video, keyframe interpolation, and temporal retake.
+Run [Lightricks LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B parameters) on [Modal](https://modal.com/) H200 GPUs. All 6 generation modes — text-to-video, image-to-video, HQ, audio-to-video, keyframe interpolation, and temporal retake.
 
 LTX-2.3 is a joint video+audio model — every mode generates synchronized audio alongside the video.
 
@@ -43,6 +43,20 @@ with open("car_race.mp4", "wb") as f:
 
 Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
 
+### Longer video (20 seconds)
+
+Set `num_frames=481` for a 20-second video at 24fps. Write a prompt with enough action to fill the duration — think like a cinematographer.
+
+```python
+prompt = """EXT. FISHING VILLAGE — DAWN. A weathered old fisherman in a faded blue jacket stands at the end of a wooden dock, coiling rope in his hands. The camera holds a wide establishing shot, mist rolling off the still harbor water. He pauses, squints toward the horizon where a pale orange sun is just breaking through the clouds. Seagulls cry overhead. He mutters to himself, "Gonna be a good one today," and tosses the rope into a small boat bobbing beside the dock. The camera slowly pushes in as he steps down into the boat, the wood creaking under his weight. He pulls the outboard motor cord twice — it sputters, catches, and rumbles to life. The boat drifts forward through the glassy water, leaving a widening wake. The camera tracks alongside as the dock and village shrink behind him, fog swallowing the shoreline. The only sound is the low hum of the motor and the gentle lap of water against the hull."""
+
+ltx = LTXVideo(mode="standard")
+result = ltx.generate.remote(prompt=prompt, num_frames=481, seed=77)
+
+with open("fisherman.mp4", "wb") as f:
+    f.write(result["video_bytes"])
+```
+
 ## Modes
 
 | Mode | Resolution | Steps | Description |
@@ -77,9 +91,9 @@ ltx = LTXVideo(mode="standard", precision="fp8")
 ```python
 ltx = LTXVideo(mode="standard")
 result = ltx.generate.remote(
-    prompt="INT. SPACECRAFT COCKPIT – anime cel-shaded style. A teenage male pilot in an orange mission flight suit grips a joystick, cockpit HUD screens glowing green, red warning lights pulsing on the walls. The camera holds nearly static on the existing framing, with a very subtle slow push-in toward the pilot's face. His eyes shift slightly, jaw tightens, and his grip hand micro-adjusts on the joystick. The red emergency lights continue their slow rhythmic pulse. A low cockpit alarm hums faintly in the background.",
-    image_bytes=open("test_image.jpeg", "rb").read(),
-    seed=42,
+prompt="INT. SPACECRAFT COCKPIT – anime cel-shaded style. A teenage male pilot in an orange mission flight suit grips a joystick, cockpit HUD screens glowing green, red warning lights pulsing on the walls. The camera holds nearly static on the existing framing, with a very subtle slow push-in toward the pilot's face. His eyes shift slightly, jaw tightens, and his grip hand micro-adjusts on the joystick. The red emergency lights continue their slow rhythmic pulse. A low cockpit alarm hums faintly in the background.",
+image_bytes=open("test_image.jpeg", "rb").read(),
+seed=42,
 )
 with open("animated_image.mp4", "wb") as f:
     f.write(result["video_bytes"])
@@ -100,8 +114,8 @@ with open("audio_video.mp4", "wb") as f:
 ```python
 ltx = LTXVideo(mode="keyframe")
 result = ltx.interpolate.remote(
-    prompt="An astronaut in a white spacesuit walks steadily forward across a rocky alien ridge at dawn. The camera is static, wide cinematic shot from behind. He steps off the jagged rock edge and strides forward into the vast orange desert, growing slightly smaller in frame. His arms swing naturally mid-walk. The dawn sky gradually brightens — the orange horizon glow expands upward into lavender. Two moons hang motionless in the indigo sky. Dust drifts faintly around his boots. Smooth, slow, cinematic movement. Photorealistic.",
-    keyframe_images=[
+prompt="An astronaut in a white spacesuit walks steadily forward across a rocky alien ridge at dawn. The camera is static, wide cinematic shot from behind. He steps off the jagged rock edge and strides forward into the vast orange desert, growing slightly smaller in frame. His arms swing naturally mid-walk. The dawn sky gradually brightens — the orange horizon glow expands upward into lavender. Two moons hang motionless in the indigo sky. Dust drifts faintly around his boots. Smooth, slow, cinematic movement. Photorealistic.",
+keyframe_images=[
         (open("img1.jpeg", "rb").read(), 0, 1.0),
         (open("img2.jpeg", "rb").read(), 120, 1.0),
     ],
@@ -124,6 +138,8 @@ result = ltx.generate.remote(
     width=1536,
     enhance_prompt=True,     # let the model expand your prompt
 )
+with open("enhanced_video.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 ```
 
 ### Comparing Standard vs Fast vs HQ vs FP8
@@ -219,3 +235,11 @@ keyframe_images=[(img_bytes, frame_index, strength), ...]
 The default Lightricks pipelines delete and reload the transformer from disk between stages — designed for consumer GPUs where VRAM is tight. On an H200 with 141 GB, there's no reason to unload.
 
 This project patches the `ModelLedger` at startup so all models stay GPU-resident. The pipeline's `del transformer; cleanup_memory()` calls still run but only drop a local reference — the patched lambda keeps the model alive. Zero disk I/O between stages. This improves the latency.
+
+H200 GPU metrics during a two-stage generation — ~100 GB VRAM resident, GPU utilization spikes during diffusion steps:
+
+![GPU metrics](static/modal_gpu_usage.jpg)
+
+Each (mode, precision) pair gets its own container pool. Containers scale to zero after 15 minutes idle:
+
+![Container pool](static/modal_containers.jpg)
