@@ -88,6 +88,16 @@ LTXVideo(mode, precision) → dedicated container pool → H200 GPU
 
 Containers scale to zero after 15 minutes idle. Cold start downloads models on first run (~2 min), then they're cached on a Modal volume.
 
+### Persistent models vs. default Lightricks behavior
+
+The default Lightricks pipelines are designed for consumer GPUs where VRAM is tight. Between stages, they `del transformer` → `gc.collect()` → `torch.cuda.empty_cache()` → reload the transformer from disk for stage 2. The `ModelLedger` uses a `DummyRegistry` by default — no caching, every `transformer()` call reads weights from safetensors on disk.
+
+This is safe but slow. On an H200 with 141 GB of VRAM, there's no reason to unload anything.
+
+This project patches the `ModelLedger` at container startup so that `transformer()`, `video_encoder()`, etc. return pre-built GPU-resident models instead of rebuilding from disk. Both stage 1 and stage 2 transformers (with different LoRA configurations) stay in VRAM simultaneously. The pipeline's `del transformer; cleanup_memory()` calls still run, but they only drop a local reference — the patched lambda keeps the model alive.
+
+Result: zero disk I/O between stages, no GC pauses, no model reconstruction. Diffusion starts immediately on every request.
+
 ## Precision
 
 | Precision | Quality | VRAM | Notes |
