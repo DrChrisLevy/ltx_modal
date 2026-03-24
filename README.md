@@ -9,7 +9,18 @@ Uses the official Lightricks inference code directly. Not a reimplementation.
 ```bash
 uv add modal
 uv run modal setup                       # one-time auth
-uv run modal deploy generate_video.py    # deploy the app
+```
+
+Create a Modal secret with your Hugging Face token (needed for the [Gemma 3](https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized) text encoder, which requires accepting Google's license):
+
+```bash
+modal secret create huggingface-secret HF_TOKEN=hf_your_token_here
+```
+
+Deploy:
+
+```bash
+uv run modal deploy generate_video.py
 ```
 
 Models download automatically on first request and are cached on a Modal volume.
