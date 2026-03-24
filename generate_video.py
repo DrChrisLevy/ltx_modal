@@ -26,7 +26,7 @@ LTX_DIR = f"{MODEL_DIR}/ltx"
 GEMMA_DIR = f"{MODEL_DIR}/gemma"
 
 
-hf_secret = modal.Secret.from_name("huggingface-secret")
+hf_secret = modal.Secret.from_dotenv()
 
 image = (
     modal.Image.debian_slim(python_version="3.12")

@@ -11,10 +11,10 @@ uv add modal
 uv run modal setup                       # one-time auth
 ```
 
-Create a Modal secret with your Hugging Face token (needed for the [Gemma 3](https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized) text encoder, which requires accepting Google's license):
+Create a `.env` file with your Hugging Face token (needed for the [Gemma 3](https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized) text encoder, which requires accepting Google's license):
 
-```bash
-uv run modal secret create huggingface-secret HF_TOKEN=hf_your_token_here
+```
+HF_TOKEN=hf_your_token_here
 ```
 
 Deploy:

@@ -17,6 +17,9 @@ test_*.jpeg
 test_*.wav
 *.wav
 
+# Secrets
+.env
+
 # Claude Code
 .claude/
 
