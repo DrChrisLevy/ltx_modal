@@ -1,8 +1,8 @@
 # LTX-2.3 on Modal
 
-Run [Lightricks LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B parameters) on Modal H200 GPUs. All 6 generation modes — text-to-video, image-to-video, HQ 1080p, audio-to-video, keyframe interpolation, and temporal retake.
+Run [Lightricks LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B parameters) on Modal H200 GPUs. All 6 generation modes — text-to-video, image-to-video, HQ, audio-to-video, keyframe interpolation, and temporal retake.
 
-Uses the official Lightricks inference code directly. Not a reimplementation.
+Uses the official Lightricks inference code directly — not a reimplementation. The key difference from running the source pipelines yourself: the default code loads and unloads the transformer from disk between stages (designed for consumer GPUs). Here, all models are loaded into H200 VRAM once at container startup and patched into the pipeline's `ModelLedger` so they stay resident. Two-stage modes keep both transformers (~88 GB) in memory simultaneously. Zero disk I/O between stages, no GC pauses — diffusion starts immediately on every request.
 
 ## Setup
 
@@ -116,12 +116,28 @@ with open("retake_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-### FP8 precision
+### Comparing Standard vs Fast VS HQ VS FP8
 
 ```python
-ltx = LTXVideo(mode="fast", precision="fp8")
-result = ltx.generate.remote(prompt="A cat sits perched on a windowsill, warm natural light streaming in through the glass, casting a soft golden glow across its fur. The camera holds in a static wide shot, barely drifting in with a slow gentle push. The cat's tail sways slowly side to side, ears twitching once toward a sound off-screen. Dust particles drift lazily through the sunbeam. Soft ambient outdoor sounds — distant birds, a light breeze.", seed=42)
-with open("cat_sleeping.mp4", "wb") as f:
+prompt="INT. SUNLIT APARTMENT – LATE AFTERNOON fluffy tabby cat sits curled on a windowsill, warm golden light washing across its fur, soft shadows pooling beneath it. The camera holds a gentle static medium shot, barely breathing with the faintest slow push-in toward the cat's face. The cat blinks slowly, shifts its weight, and turns its head slightly toward the glass. A curtain beside it sways once in a lazy draft, then stills. Outside, leaves flutter and birds chirp softly in the distance."
+ltx = LTXVideo(mode="standard")
+result = ltx.generate.remote(prompt=prompt)
+with open("cat_standard.mp4", "wb") as f:
+    f.write(result["video_bytes"])
+
+ltx = LTXVideo(mode="hq")
+result = ltx.generate.remote(prompt=prompt)
+with open("cat_hq.mp4", "wb") as f:
+    f.write(result["video_bytes"])
+
+ltx = LTXVideo(mode="fast")
+result = ltx.generate.remote(prompt=prompt)
+with open("cat_fast.mp4", "wb") as f:
+    f.write(result["video_bytes"])
+
+ltx = LTXVideo(mode="standard", precision="fp8")
+result = ltx.generate.remote(prompt=prompt)
+with open("cat_standard_fp8.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
