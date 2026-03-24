@@ -100,10 +100,15 @@ with open("interpolated_video.mp4", "wb") as f:
 ### Retake (edit a time region)
 
 ```python
+# Generate a base video first
+ltx = LTXVideo(mode="standard")
+base = ltx.generate.remote(prompt="A calm city street at night, neon signs, wet pavement")
+
+# Replace seconds 2-4 with new content
 retake = LTXVideo(mode="retake")
 result = retake.retake.remote(
-    video_bytes=open("input.mp4", "rb").read(),
-    prompt="A sunny beach with palm trees swaying in the wind",
+    video_bytes=base["video_bytes"],
+    prompt="A sudden explosion lights up the street, debris flies everywhere",
     start_time=2.0,
     end_time=4.0,
 )
