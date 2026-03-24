@@ -20,6 +20,9 @@ test_*.wav
 # Claude Code
 .claude/
 
+# macOS
+.DS_Store
+
 # Log files
 *.log
 
