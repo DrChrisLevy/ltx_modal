@@ -12,10 +12,13 @@ wheels/
 # Generated videos
 *.mp4
 
-# Test assets (downloaded for battle testing)
+# Test assets (not tracked — download for local testing)
 test_*.jpeg
 test_*.wav
-electric_snippet.wav
+*.wav
+
+# Claude Code
+.claude/
 
 # Log files
 *.log
