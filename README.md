@@ -39,7 +39,22 @@ with open("output.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-Every method returns a dict with `video_bytes`, `filename`, `duration`, `size_mb`, `mode`, and `gen_time_s`. Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
+Every method returns a dict with `video_bytes` plus metadata. The same metadata is saved as JSON on the `ltx-outputs` Modal volume alongside the `.mp4` file.
+
+```python
+{
+    "video_bytes": b"...",       # raw MP4 bytes (not in the JSON file)
+    "filename": "20260323_sunset_s42.mp4",
+    "prompt": "A cat sitting on a windowsill watching rain",
+    "seed": 42,
+    "duration": 5.04,
+    "size_mb": 12.3,
+    "timestamp": "2026-03-23T...",
+    "mode": "fast",
+    "precision": "bf16",
+    "gen_time_s": 15.2,
+}
+```
 
 ## Modes
 
