@@ -61,7 +61,7 @@ Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
 ```python
 ltx = LTXVideo(mode="standard")
 result = ltx.generate.remote(
-    prompt="A young male anime-style pilot in his late teens, black hair with a white streak, wearing an orange flight suit covered in mission patches, grips dual joysticks with fierce intensity. The camera stays focused on hit face as he is surrounded by glowing green holographic displays and flashing red alert lights.",
+    prompt="INT. SPACECRAFT COCKPIT – anime cel-shaded style. A teenage male pilot in an orange mission flight suit grips a joystick, cockpit HUD screens glowing green, red warning lights pulsing on the walls. The camera holds nearly static on the existing framing, with a very subtle slow push-in toward the pilot's face. His eyes shift slightly, jaw tightens, and his grip hand micro-adjusts on the joystick. The red emergency lights continue their slow rhythmic pulse. A low cockpit alarm hums faintly in the background.",
     image_bytes=open("test_image.jpeg", "rb").read(),
     seed=42,
 )
@@ -100,26 +100,24 @@ with open("interpolated_video.mp4", "wb") as f:
 ### Retake (edit a time region)
 
 ```python
-standard = LTXVideo(mode="standard")
-base = standard.generate.remote(
-    prompt="A woman walks down a quiet city street at night, neon signs reflecting on wet pavement",
-    num_frames=121,
-)
-
 retake = LTXVideo(mode="retake")
 result = retake.retake.remote(
-    video_bytes=base["video_bytes"],
-    prompt="A monster crashes through buildings, debris and dust flying everywhere, explosions",
-    start_time=1.0,
+    video_bytes=open("input.mp4", "rb").read(),
+    prompt="A sunny beach with palm trees swaying in the wind",
+    start_time=2.0,
     end_time=4.0,
 )
+with open("retake_video.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 ```
 
 ### FP8 precision
 
 ```python
 ltx = LTXVideo(mode="fast", precision="fp8")
-result = ltx.generate.remote(prompt="...", seed=42)
+result = ltx.generate.remote(prompt="A cat sits perched on a windowsill, warm natural light streaming in through the glass, casting a soft golden glow across its fur. The camera holds in a static wide shot, barely drifting in with a slow gentle push. The cat's tail sways slowly side to side, ears twitching once toward a sound off-screen. Dust particles drift lazily through the sunbeam. Soft ambient outdoor sounds — distant birds, a light breeze.", seed=42)
+with open("cat_sleeping.mp4", "wb") as f:
+    f.write(result["video_bytes"])
 ```
 
 ---
