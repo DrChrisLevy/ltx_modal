@@ -32,27 +32,25 @@ import modal
 
 LTXVideo = modal.Cls.from_name("ltx-video", "LTXVideo")
 
-ltx = LTXVideo(mode="fast")
-result = ltx.generate.remote(prompt="A cat sitting on a windowsill watching rain")
+ltx = LTXVideo(mode="standard")
+result = ltx.generate.remote(prompt="Mickey Mouse and Minnie Mouse dancing in the rain")
 
 with open("output.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-Every method returns a dict with `video_bytes`, `filename`, `duration`, `size_mb`, `mode`, and `gen_time_s`. Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
+Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
 
 ## Modes
 
-| Mode | Steps | Resolution | ~Time (5s) | Description |
-|------|-------|-----------|------------|-------------|
-| **standard** | 30+4 | 1024x1536 | 71s | Best quality, full CFG guidance |
-| **fast** | 8+4 | 1024x1536 | 15s | Distilled model, fixed sigmas |
-| **hq** | 15+4 | 1088x1920 | 40s (2s) | 1080p, res_2s second-order sampler |
-| **a2vid** | 30+4 | 1024x1536 | 71s | Audio-conditioned generation |
-| **keyframe** | 30+4 | 1024x1536 | 85s | Interpolation between frames |
-| **retake** | 40 | source | 1490s (10s) | Edit a time region of existing video |
-
-All two-stage modes generate at 50% resolution, then upscale 2x with a distilled LoRA refinement pass.
+| Mode | Description |
+|------|-------------|
+| **standard** | Best quality text/image-to-video |
+| **fast** | ~4x faster, distilled model |
+| **hq** | 1080p with second-order sampler |
+| **a2vid** | Audio-conditioned video generation |
+| **keyframe** | Interpolation between keyframe images |
+| **retake** | Edit a time region of existing video |
 
 ## Examples
 
