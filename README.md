@@ -156,9 +156,17 @@ with open("cat_standard_fp8.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-| Standard | Fast | HQ | FP8 |
-|----------|------|----|-----|
-| <video src="https://github.com/user-attachments/assets/1621d7fd-4f4d-492d-837a-b2e8791722be" controls width="250"></video> | <video src="https://github.com/user-attachments/assets/db9496e3-bf62-41f9-b0af-25fee3e97002" controls width="250"></video> | <video src="https://github.com/user-attachments/assets/7c9983a9-436b-4756-989f-b1c9df44e58b" controls width="250"></video> | <video src="https://github.com/user-attachments/assets/a9f96bf2-f120-4738-8e80-749c26796638" controls width="250"></video> |
+**Standard**
+<video src="https://github.com/user-attachments/assets/1621d7fd-4f4d-492d-837a-b2e8791722be" controls width="600"></video>
+
+**Fast**
+<video src="https://github.com/user-attachments/assets/db9496e3-bf62-41f9-b0af-25fee3e97002" controls width="600"></video>
+
+**HQ**
+<video src="https://github.com/user-attachments/assets/7c9983a9-436b-4756-989f-b1c9df44e58b" controls width="600"></video>
+
+**FP8**
+<video src="https://github.com/user-attachments/assets/a9f96bf2-f120-4738-8e80-749c26796638" controls width="600"></video>
 
 ### Longer video (20 seconds)
 
