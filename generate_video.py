@@ -750,26 +750,3 @@ class LTXVideo:
         result["gen_time_s"] = round(gen_time, 1)
         print(f"  done in {gen_time:.0f}s | {result['filename']}")
         return result
-
-    @modal.method()
-    def list_outputs(self) -> list[dict]:
-        """List all videos on the output volume."""
-        import json
-        from pathlib import Path
-
-        out = Path(OUTPUT_DIR)
-        if not out.exists():
-            return []
-
-        videos = []
-        for mp4 in sorted(out.glob("*.mp4")):
-            entry = {
-                "filename": mp4.name,
-                "size_mb": round(mp4.stat().st_size / 1024 / 1024, 2),
-            }
-            meta_path = Path(f"{mp4}.json")
-            if meta_path.exists():
-                with open(meta_path) as f:
-                    entry["metadata"] = json.load(f)
-            videos.append(entry)
-        return videos
