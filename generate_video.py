@@ -73,10 +73,6 @@ def _snap_frames(n: int) -> int:
     scaledown_window=15 * 60,
 )
 class LTXVideo:
-    # TODO: Add method/mode guards — calling generate() on an a2vid container
-    #   would fail silently. Callers dispatch correctly today but should validate.
-    # TODO: Skip loading unused components per mode — audio_encoder loaded but
-    #   unused for standard/hq/keyframe; audio_decoder+vocoder unused for a2vid.
     mode: str = modal.parameter()
     precision: str = modal.parameter(default="bf16")
 
@@ -474,6 +470,8 @@ class LTXVideo:
         enhance_prompt: bool = False,
     ) -> dict:
         """Text/image-to-video generation (standard, fast, hq modes)."""
+        if self.mode not in ("standard", "fast", "hq"):
+            raise ValueError(f"generate() not supported in {self.mode} mode")
         import time
 
         import torch
@@ -572,6 +570,8 @@ class LTXVideo:
         enhance_prompt: bool = False,
     ) -> dict:
         """Audio-driven video generation (a2vid mode)."""
+        if self.mode != "a2vid":
+            raise ValueError(f"generate_from_audio() not supported in {self.mode} mode")
         import time
 
         import torch
@@ -645,6 +645,8 @@ class LTXVideo:
         keyframe_images: list of (image_bytes, frame_idx, strength) tuples.
         Example: [(start_img, 0, 1.0), (end_img, 120, 1.0)]
         """
+        if self.mode != "keyframe":
+            raise ValueError(f"interpolate() not supported in {self.mode} mode")
         import time
 
         import torch
@@ -701,6 +703,8 @@ class LTXVideo:
         enhance_prompt: bool = False,
     ) -> dict:
         """Regenerate a time region [start_time, end_time] of an existing video (retake mode)."""
+        if self.mode != "retake":
+            raise ValueError(f"retake() not supported in {self.mode} mode")
         import time
 
         import torch
