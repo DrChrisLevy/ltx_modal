@@ -87,7 +87,7 @@ with open("animated_image.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-<video src="https://github.com/user-attachments/assets/6621c2ab-582d-4f0e-9b81-7d3694679fe9" controls width="600"></video>
+<video src="https://github.com/user-attachments/assets/417a61b1-f68f-4cbf-ad59-448e8c975e9b" controls width="600"></video>
 
 ### Audio-to-video
 
