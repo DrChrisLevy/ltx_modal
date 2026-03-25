@@ -41,6 +41,8 @@ with open("car_race.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
+<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/car_race.mp4" controls width="600"></video>
+
 Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
 
 ## Modes
@@ -85,6 +87,8 @@ with open("animated_image.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
+<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/animated_image.mp4" controls width="600"></video>
+
 ### Audio-to-video
 
 ```python
@@ -94,6 +98,8 @@ prompt="A guitarist shreds a solo on stage", audio_bytes=open("static/test_audio
 with open("audio_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
+
+<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/audio_video.mp4" controls width="600"></video>
 
 ### Keyframe interpolation
 
@@ -111,6 +117,8 @@ with open("interpolated_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
+<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/interpolated_video.mp4" controls width="600"></video>
+
 ### Using optional parameters
 
 ```python
@@ -127,6 +135,8 @@ result = ltx.generate.remote(
 with open("enhanced_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
+
+<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/enhanced_video.mp4" controls width="600"></video>
 
 ### Comparing Standard vs Fast vs HQ vs FP8
 
@@ -146,6 +156,10 @@ with open("cat_standard_fp8.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
+| Standard | Fast | HQ | FP8 |
+|----------|------|----|-----|
+| <video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/cat_standard.mp4" controls width="250"></video> | <video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/cat_fast.mp4" controls width="250"></video> | <video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/cat_hq.mp4" controls width="250"></video> | <video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/cat_standard_fp8.mp4" controls width="250"></video> |
+
 ### Longer video (20 seconds)
 
 Set `num_frames=481` for a 20-second video at 24fps. Write a prompt with enough action to fill the duration — think like a cinematographer.
@@ -159,6 +173,8 @@ result = ltx.generate.remote(prompt=prompt, num_frames=481, seed=77)
 with open("fisherman.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
+
+<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/fisherman.mp4" controls width="600"></video>
 
 ## Parameters
 
