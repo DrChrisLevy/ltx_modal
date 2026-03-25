@@ -41,7 +41,7 @@ with open("car_race.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/car_race.mp4" controls width="600"></video>
+<video src="https://github.com/user-attachments/assets/70e168b7-dac1-4994-942f-ef51a63f587f" controls width="600"></video>
 
 Videos are also saved to the `ltx-outputs` Modal volume with JSON metadata.
 
@@ -87,7 +87,7 @@ with open("animated_image.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/animated_image.mp4" controls width="600"></video>
+<video src="https://github.com/user-attachments/assets/6621c2ab-582d-4f0e-9b81-7d3694679fe9" controls width="600"></video>
 
 ### Audio-to-video
 
@@ -99,7 +99,7 @@ with open("audio_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/audio_video.mp4" controls width="600"></video>
+<video src="https://github.com/user-attachments/assets/0e488b4d-c1a0-41d0-ab86-6d4794963856" controls width="600"></video>
 
 ### Keyframe interpolation
 
@@ -117,7 +117,7 @@ with open("interpolated_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/interpolated_video.mp4" controls width="600"></video>
+<video src="https://github.com/user-attachments/assets/fa2f2550-9ce4-474b-8ed9-5e91ae0d132c" controls width="600"></video>
 
 ### Using optional parameters
 
@@ -136,7 +136,7 @@ with open("enhanced_video.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/enhanced_video.mp4" controls width="600"></video>
+<video src="https://github.com/user-attachments/assets/187ea4e9-6a3f-430c-be07-2de74f9bd5a6" controls width="600"></video>
 
 ### Comparing Standard vs Fast vs HQ vs FP8
 
@@ -158,7 +158,7 @@ with open("cat_standard_fp8.mp4", "wb") as f:
 
 | Standard | Fast | HQ | FP8 |
 |----------|------|----|-----|
-| <video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/cat_standard.mp4" controls width="250"></video> | <video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/cat_fast.mp4" controls width="250"></video> | <video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/cat_hq.mp4" controls width="250"></video> | <video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/cat_standard_fp8.mp4" controls width="250"></video> |
+| <video src="https://github.com/user-attachments/assets/1621d7fd-4f4d-492d-837a-b2e8791722be" controls width="250"></video> | <video src="https://github.com/user-attachments/assets/db9496e3-bf62-41f9-b0af-25fee3e97002" controls width="250"></video> | <video src="https://github.com/user-attachments/assets/7c9983a9-436b-4756-989f-b1c9df44e58b" controls width="250"></video> | <video src="https://github.com/user-attachments/assets/a9f96bf2-f120-4738-8e80-749c26796638" controls width="250"></video> |
 
 ### Longer video (20 seconds)
 
@@ -174,7 +174,7 @@ with open("fisherman.mp4", "wb") as f:
     f.write(result["video_bytes"])
 ```
 
-<video src="https://github.com/DrChrisLevy/ltx_modal/releases/download/demos/fisherman.mp4" controls width="600"></video>
+<video src="https://github.com/user-attachments/assets/57e8bb2e-36a4-4752-ba0c-d5965be33cab" controls width="600"></video>
 
 ## Parameters
 
