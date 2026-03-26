@@ -83,7 +83,7 @@ def run_tests(test: int = 0, precision: str = "bf16"):
         prompt="A woman slowly turns her head toward the camera and smiles, soft natural lighting, her hair moves gently in a breeze, shallow depth of field",
         num_frames=121,
         seed=42,
-        image_bytes=_load_file("test_image.jpeg"),
+        image_bytes=_load_file("static/test_image.jpeg"),
         image_strength=1.0,
     )
     calls["5_enhanced_49f"] = fast.generate.spawn(
@@ -94,12 +94,12 @@ def run_tests(test: int = 0, precision: str = "bf16"):
     )
     calls["6_a2v"] = a2vid.generate_from_audio.spawn(
         prompt="A guitarist shreds an electric guitar solo on stage, colorful stage lights flash and pulse, the crowd cheers, smoke fills the air, cinematic concert footage",
-        audio_bytes=_load_file("test_audio.wav"),
+        audio_bytes=_load_file("static/test_audio.wav"),
         num_frames=121,
         seed=42,
     )
 
-    kf1, kf2 = _load_file("test_kf1.jpeg"), _load_file("test_kf2.jpeg")
+    kf1, kf2 = _load_file("static/img1.jpeg"), _load_file("static/img2.jpeg")
     calls["7_keyframe"] = keyframe.interpolate.spawn(
         prompt="A smooth cinematic transition between two scenes, the camera glides through space, soft lighting shifts gradually",
         keyframe_images=[(kf1, 0, 1.0), (kf2, 120, 1.0)],
@@ -170,7 +170,7 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
             prompt="A woman slowly turns her head toward the camera and smiles, soft natural lighting, her hair moves gently in a breeze, shallow depth of field",
             num_frames=121,
             seed=42,
-            image_bytes=_load_file("test_image.jpeg"),
+            image_bytes=_load_file("static/test_image.jpeg"),
             image_strength=1.0,
         )
         _save(r, "4_i2v_fast", precision)
@@ -189,7 +189,7 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
         print("=== Test 6: audio-to-video (a2vid, 121 frames) ===")
         r = a2vid.generate_from_audio.remote(
             prompt="A guitarist shreds an electric guitar solo on stage, colorful stage lights flash and pulse, the crowd cheers, smoke fills the air, cinematic concert footage",
-            audio_bytes=_load_file("test_audio.wav"),
+            audio_bytes=_load_file("static/test_audio.wav"),
             num_frames=121,
             seed=42,
         )
@@ -197,7 +197,7 @@ def _run_single(test, *, standard, fast, hq, a2vid, keyframe, retake, precision=
 
     elif test == 7:
         print("=== Test 7: keyframe interpolation (121 frames) ===")
-        kf1, kf2 = _load_file("test_kf1.jpeg"), _load_file("test_kf2.jpeg")
+        kf1, kf2 = _load_file("static/img1.jpeg"), _load_file("static/img2.jpeg")
         r = keyframe.interpolate.remote(
             prompt="A smooth cinematic transition between two scenes, the camera glides through space, soft lighting shifts gradually",
             keyframe_images=[(kf1, 0, 1.0), (kf2, 120, 1.0)],
